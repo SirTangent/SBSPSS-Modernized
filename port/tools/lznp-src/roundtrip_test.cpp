@@ -3,8 +3,8 @@
 	own decoder (source/utils/lznp.cpp) reconstructs byte-for-byte.
 
 	Build + run from the repo root:
-		g++ -O2 -I source/utils port/tools/lznp/roundtrip_test.cpp \
-		    port/tools/lznp/lznp_encode.cpp source/utils/lznp.cpp -o roundtrip
+		g++ -O2 -I source/utils port/tools/lznp-src/roundtrip_test.cpp \
+		    port/tools/lznp-src/lznp_encode.cpp source/utils/lznp.cpp -o roundtrip
 		./roundtrip [files...]
 */
 

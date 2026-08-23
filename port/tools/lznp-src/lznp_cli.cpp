@@ -10,8 +10,8 @@
 		lznp [-Q] <infile> <outfile>
 
 	-Q (quiet) is accepted and ignored. Build:
-		g++ -O2 -static port/tools/lznp/lznp_cli.cpp \
-		    port/tools/lznp/lznp_encode.cpp -o port/tools/lznp.exe
+		g++ -O2 -static port/tools/lznp-src/lznp_cli.cpp \
+		    port/tools/lznp-src/lznp_encode.cpp -o port/tools/lznp.exe
 */
 
 #include <stdio.h>
