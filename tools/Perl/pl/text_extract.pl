@@ -25,6 +25,7 @@ local	($inFile,$outFile,$tagPrefix)=@ARGV;
 # Open files
 open INFILE, $inFile || die "Can't open input file '$inFile': $!\n";
 open OUTFILE, ">$outFile" || die "Can't open output file '$outFile': $!\n";
+binmode(OUTFILE,":crlf");	# match vintage Windows perl output (CRLF) for the 1999 tools
 
 
 # Output header
