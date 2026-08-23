@@ -1,6 +1,10 @@
 #ifndef _included_gte_
 	#define _included_gte_
 
+	#include "system\asmport.h"
+
+#ifdef PSX_MIPS_ASM
+
 	//
 	// Store individual components of sv
 	//
@@ -43,5 +47,19 @@
 		:							\
 		: "r"( r0 )						\
 		: "memory" )
+
+#else	/* PSX_MIPS_ASM */
+
+	/* Portable equivalents: data regs 9,10,11 = IR1,IR2,IR3 */
+
+	#define gte_stsv_x( r0 )	(*(short*)(r0)=(short)GTEport_GetData(9))
+	#define gte_stsv_y( r0 )	(*(short*)(r0)=(short)GTEport_GetData(10))
+	#define gte_stsv_z( r0 )	(*(short*)(r0)=(short)GTEport_GetData(11))
+
+	#define gte_stlvl_x( r0 )	(*(long*)(r0)=(long)GTEport_GetData(9))
+	#define gte_stlvl_y( r0 )	(*(long*)(r0)=(long)GTEport_GetData(10))
+	#define gte_stlvl_z( r0 )	(*(long*)(r0)=(long)GTEport_GetData(11))
+
+#endif	/* PSX_MIPS_ASM */
 
 #endif

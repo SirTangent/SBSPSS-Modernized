@@ -65,12 +65,15 @@
 #define setSemiTransShadeTexPolyFT4(p)	setlen(p, 9),  setcode(p, 0x2c|GPUCode_SemiTrans|GPUCode_ShadeTex)
 
 /*** Fast Replacements *********************************************************************************/
+#include	"system\asmport.h"
+
 #undef	setaddr
 #undef	getaddr
+
+#ifdef	PSX_MIPS_ASM
+
 #define set3(r0,r1) 		({ __asm__ ( "swl %1, 2( %0 )" : : "r"( r0 ), "r"( r1 ) : "memory" ); })
 #define get3(r0) 			({ unsigned long t; __asm__ ( "lwl %0, 2( %1 )" : "=r"(t) : "r"( r0) : "memory" ); t; })
-#define setaddr(_p0,_p1)	set3((_p0), ((u32) (_p1)) << 8)
-#define getaddr(_p)			(get3(_p) >> 8)
 
 #undef	catPrim
 #define	CatPrim	catPrim
@@ -80,6 +83,38 @@
 	:											\
 	: "r"( r0 ), "r"( r1 )						\
 	: "$12", "memory" )
+
+#else	/* PSX_MIPS_ASM */
+
+/*	Portable equivalents of the swl/lwl tricks above.  A prim tag is 8 bits
+	of length over a 24-bit address; set3/get3 touch only the low 3 bytes of
+	the word, exactly like swl/lwl at offset 2 on little-endian MIPS.
+	NOTE: packing a pointer into 24 bits assumes prims live in a 32-bit
+	address space - a 64-bit port must keep its prim pool within one. */
+inline void	set3(void *r0,u32 r1)
+{
+u32	*w=(u32*)r0;
+	*w=(*w&0xff000000)|((r1>>8)&0x00ffffff);
+}
+
+inline u32	get3(const void *r0)
+{
+	return((*(const u32*)r0&0x00ffffff)<<8);
+}
+
+#undef	catPrim
+#define	CatPrim	catPrim
+inline void	catPrimF(void *r0,u32 r1)
+{
+u32	*w=(u32*)r0;
+	*w=(*w&0xff000000)|(r1&0x00ffffff);
+}
+#define	catPrim(r0,r1)		catPrimF((void*)(r0),(u32)(size_t)(r1))
+
+#endif	/* PSX_MIPS_ASM */
+
+#define setaddr(_p0,_p1)	set3((_p0), ((u32)(size_t)(_p1)) << 8)
+#define getaddr(_p)			(get3(_p) >> 8)
 
 
 #ifdef	USE_NTAGS
@@ -148,6 +183,8 @@ inline void UnlinkNTagtoNTag(sOT *to, sOT *from, long count)
 /*** OTag Stuff **************************************************************************************/
 typedef	u32	sOT;
 
+#ifdef	PSX_MIPS_ASM
+
 #undef	addPrim
 #define	AddPrim		addPrim
 #define	AddPrim		addPrim
@@ -170,6 +207,35 @@ typedef	u32	sOT;
 	:											\
 	: "r"( r0 ), "r"( r1 ), "r"( r2 )			\
 	: "$12", "$13", "memory" )
+
+#else	/* PSX_MIPS_ASM */
+
+/*	Portable equivalents: link a prim (or a prim chain r1..r2) into the OT
+	entry r0.  Only the 24-bit address fields move; both length bytes are
+	preserved, matching the asm above bit for bit. */
+#undef	addPrim
+#define	AddPrim		addPrim
+inline void	addPrimF(void *r0,void *r1)
+{
+u32	*ot=(u32*)r0,*pr=(u32*)r1;
+u32	head=*ot&0x00ffffff;
+	*ot=(*ot&0xff000000)|((u32)(size_t)r1&0x00ffffff);
+	*pr=(*pr&0xff000000)|head;
+}
+#define	addPrim(r0,r1)		addPrimF((void*)(r0),(void*)(r1))
+
+#undef	addPrims
+#define	AddPrims	addPrims
+inline void	addPrimsF(void *r0,void *r1,void *r2)
+{
+u32	*ot=(u32*)r0,*pe=(u32*)r2;
+u32	head=*ot&0x00ffffff;
+	*ot=(*ot&0xff000000)|((u32)(size_t)r1&0x00ffffff);
+	*pe=(*pe&0xff000000)|head;
+}
+#define	addPrims(r0,r1,r2)	addPrimsF((void*)(r0),(void*)(r1),(void*)(r2))
+
+#endif	/* PSX_MIPS_ASM */
 
 #define	InitOTag(Ot, Count)						ClearOTag(Ot,Count);
 #define	InitOTagR(Ot, Count)					ClearOTagR(Ot,Count);

@@ -54,11 +54,14 @@ static int skip_atoi(const char **s)
 #define SPECIAL	32		/* 0x */
 #define LARGE	64		/* use 'ABCDEF' instead of 'abcdef' */
 
-#define do_div(n,base) ({ \
-int __res; \
-__res = ((unsigned long) n) % (unsigned) base; \
-n = ((unsigned long) n) / (unsigned) base; \
-__res; })
+/* Portable rewrite of the old GNU statement-expression macro */
+static inline int do_div(long &n,int base)
+{
+int	__res;
+	__res=(int)(((unsigned long)n)%(unsigned)base);
+	n=(long)(((unsigned long)n)/(unsigned)base);
+	return(__res);
+}
 
 static char * number(char * str, long num, int base, int size, int precision
 	,int type)

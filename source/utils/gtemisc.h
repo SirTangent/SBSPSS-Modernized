@@ -17,6 +17,13 @@
 /* The value for a full circle (360 degrees) for the GTE libraries */
 #define	FULLCIRCLE	ONE
 
+/*	This header is not currently included by any translation unit.  Its raw
+	MIPS asm macros are fenced off so a non-MIPS build that ever pulls it in
+	still parses; portable equivalents can be added if anything starts using
+	them. */
+#include	"system\asmport.h"
+#ifdef	PSX_MIPS_ASM
+
 
 /******************************************************************************/
 
@@ -735,5 +742,7 @@
 
 /******************************************************************************/
 
+
+#endif	/* PSX_MIPS_ASM */
 
 #endif	/* __GTEMISC_H__ */

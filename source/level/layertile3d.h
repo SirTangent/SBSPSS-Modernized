@@ -6,6 +6,10 @@
 #define __LAYER_TILE_3D_Hx__
 
 
+#include	"system\asmport.h"
+
+#ifdef	PSX_MIPS_ASM
+
 #define CMX_SetRotMatrixXY( r0 ) __asm__  (       \
     "lw $12, 0( %0 );"                  \
     "lw $13, 4( %0 );"                  \
@@ -14,6 +18,19 @@
     :                           \
     : "r"( r0 )                     \
     : "$12", "$13")
+
+#else	/* PSX_MIPS_ASM */
+
+/*	Portable equivalent: ctrl regs 0,2 = packed R11R12 and R22R23 pairs */
+inline void	CMX_SetRotMatrixXYF(const void *r0)
+{
+const unsigned long	*w=(const unsigned long*)r0;
+	GTEport_SetCtrl(0,w[0]);
+	GTEport_SetCtrl(2,w[1]);
+}
+#define CMX_SetRotMatrixXY(r0)	CMX_SetRotMatrixXYF((const void*)(r0))
+
+#endif	/* PSX_MIPS_ASM */
 
 struct	sFlipTable
 {
