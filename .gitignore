@@ -4,3 +4,4 @@ data/Scripts/defs/trans.scr
 *.stackdump
 .idea/
 nul
+sn.ini
