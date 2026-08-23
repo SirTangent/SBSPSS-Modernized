@@ -3,3 +3,4 @@ out/
 data/Scripts/defs/trans.scr
 *.stackdump
 .idea/
+nul
