@@ -86,6 +86,39 @@ only the headers that cannot work on x86:
     home; `PORT_Scratchpad` declared here (portable branch only) so game code
     and shim share one declaration instead of three raw externs.
 
+13. **Warning-free pass — two latent bugs fixed** (the PC build is now 0
+    warnings in both variants; these are behavioural fixes, not cosmetics):
+    - `source/hazard/hrckshrd.cpp:127` and `source/platform/pfishhk.cpp:172`
+      — `getThinkBBox()` returned `&objThinkBox`, the address of a stack
+      local.  Dangling on PS1 too; it worked only because every caller reads
+      through the pointer before the stack is reused.  Now `static`, matching
+      the base class (`thing.h:191` returns the member `m_collisionArea`).
+    - `source/game/gameslot.h:184` — `getHighestLevelOpen()` wrote its
+      out-params only inside `if(isLevelOpen(...))`, so with no level open
+      the callers (`start.cpp:302`, `map.h:51`) read uninitialised stack
+      ints.  Defaults to chapter 0 / level 0 now.
+    - `source/gfx/animtex.cpp:61` — the `default:` (unknown pixel depth) case
+      only `ASSERT`ed, and `ASSERT` compiles away in FINAL, leaving
+      `PixPerWord` uninitialised as the divisor two lines later.  Sets a safe
+      `PixPerWord=1` first.  *(Surfaced only by the FINAL variant's heavier
+      inlining — a good argument for building both.)*
+
+14. **Warning-free pass — non-behavioural** (same batch as #13):
+    - `source/gui/gui.h:65` — `virtual ~CGUIObject() {}` added: `shutdown()`
+      does `delete this` on a polymorphic hierarchy.  No class in the
+      hierarchy declares a destructor, so this only fixes dispatch.
+    - `source/fileio/fileio.cpp:384,399` — `loadDataBank`/`dumpDataBank`
+      index `DataBank[DATABANK_MAX]` where `DATABANK_MAX==0` (a zero-length
+      array).  Neither function has any caller; a `if (DATABANK_MAX==0)
+      return;` guard makes that explicit and folds the dead indexing away.
+    - `source/backend/credits.cpp:85` — `enum {...} CREDIT_CONTROL;`
+      accidentally declared a *global variable* of unnamed enum type (used
+      nowhere; only the `CC_*` constants are).  Now `enum CREDIT_CONTROL
+      {...};`.
+    - `source/system/clickcount.cpp:64` — the `OpenEvent` handler cast is
+      dual-pathed on `PSX_MIPS_ASM`: EGCS insists on `(long (*)(...))`,
+      which modern GCC rejects, and vice versa.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
@@ -104,9 +137,7 @@ overloaded-virtual, non-c-typedef-for-linkage, parentheses, char-subscripts,
 sign-compare, misleading-indentation, int-in-bool-context, dangling-else,
 header-guard, unused, write-strings.  The shim keeps plain `-Wall`.
 
-The ~14 warnings that remain are kept deliberately visible as bug-smells to
-revisit in later milestones: `-Wreturn-local-addr` ×2 (objThinkBox),
-`-Wmaybe-uninitialized` ×4 (level/chapter), `-Warray-bounds` ×5 (accesses
-into the zero-length `DataBank[0]` — unreachable while `DATABANK_MAX==0`),
-`-Wdelete-non-virtual-dtor` (CGUIObject), one fn-pointer conversion and one
-unnamed-enum linkage note.
+Every warning those flags do *not* suppress has since been fixed at its
+source (entries #13/#14 above), so **both variants build with 0 warnings and
+0 errors**.  Keep it that way: a new warning now means new code, not
+inherited noise.
