@@ -14,6 +14,7 @@ extern "C" {
 void			Port_Pump(void);			/* advance vblank clock, fire callbacks */
 unsigned long	Port_VBlankCount(void);
 void			Port_SetVBlankHz(int hz);	/* 60 NTSC / 50 PAL (SetVideoMode) */
+double			Port_NowSeconds(void);		/* QPC wall clock (CD pacing etc.) */
 
 #ifdef __cplusplus
 }

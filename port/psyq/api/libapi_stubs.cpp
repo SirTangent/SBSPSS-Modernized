@@ -9,13 +9,34 @@
 	same name are stdcall and take a parameter - different decorated symbols
 	on i686, so no collision.)
 
-	The event/root-counter set backs system/clickcount.cpp's RCnt2 timer;
-	M1 accepts the registration and NEVER FIRES it, so CClickCount's
-	timeSinceLast() reads frozen zeros (gstate.cpp then pins framesSinceLast
-	to 1).  Every stub logs so timing work in M2 points back here; driving
-	the fake counter from the pump's QPC clock is the M2 fix.
+	The event/root-counter set drives system/clickcount.cpp's RCnt2 timer
+	for real since M2: OpenEvent(RCntCNT2) registers the handler, SetRCnt
+	the countdown target, and the pump fires the handler at the programmed
+	rate per emulated vblank (RCnt2 counts at sysclock/8 = 4,233,600 Hz;
+	the game's 17200 target = ~246 Hz = ~4 ticks per NTSC vblank).
 */
 #include "stub_log.h"
+
+/* RCnt2 timer state, ticked by Port_RCnt2Vblank from the pump */
+static long		(*g_rcnt2Func)();
+static unsigned	g_rcnt2Target;
+static int		g_rcnt2Running;
+static long long g_rcnt2Accum;		/* counts carried between vblanks */
+
+static const long long RCNT2_HZ = 4233600;	/* sysclock/8 */
+
+extern "C" void Port_RCnt2Vblank(int vblankHz)
+{
+	if (!g_rcnt2Running || !g_rcnt2Func || g_rcnt2Target == 0)
+		return;
+	g_rcnt2Accum += RCNT2_HZ / vblankHz;
+	long long fires = g_rcnt2Accum / g_rcnt2Target;
+	if (fires > 64)
+		fires = 64;		/* stall guard - drop excess ticks like the vblank clamp */
+	g_rcnt2Accum -= fires * g_rcnt2Target;
+	while (fires-- > 0)
+		g_rcnt2Func();
+}
 
 extern "C" {
 
@@ -27,22 +48,30 @@ void ExitCriticalSection(void)		{ }
 
 long OpenEvent(unsigned long desc, long spec, long mode, long (*func)())
 {
-	(void)desc; (void)spec; (void)mode; (void)func;
+	(void)spec; (void)mode;
+	if ((desc & 0xFF) == 0x02)		/* RCntCNT2 = DescRC|0x02 */
+	{
+		g_rcnt2Func = func;
+		return 2;
+	}
 	PSYQ_STUB_ONCE();
 	return 1;	/* fake event handle */
 }
-long CloseEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
-long EnableEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
-long DisableEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
+long CloseEvent(long ev)			{ if (ev == 2) g_rcnt2Func = 0; return 1; }
+long EnableEvent(long ev)			{ (void)ev; return 1; }
+long DisableEvent(long ev)			{ (void)ev; return 1; }
 
 long SetRCnt(unsigned long spec, unsigned short target, long mode)
 {
-	(void)spec; (void)target; (void)mode;
-	PSYQ_STUB_ONCE();
+	(void)mode;
+	if ((spec & 0xFF) == 0x02)
+		g_rcnt2Target = target;
+	else
+		PSYQ_STUB_ONCE();
 	return 1;
 }
-long StartRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 1; }
-long StopRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 1; }
+long StartRCnt(unsigned long spec)	{ if ((spec & 0xFF) == 0x02) g_rcnt2Running = 1; return 1; }
+long StopRCnt(unsigned long spec)	{ if ((spec & 0xFF) == 0x02) g_rcnt2Running = 0; return 1; }
 long GetRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 0; }
 
 void FlushCache(void)				{ }

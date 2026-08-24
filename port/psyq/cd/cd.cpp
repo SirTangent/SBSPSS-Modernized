@@ -53,8 +53,10 @@ static VirtFile g_files[] =
 static const int	g_fileCount = sizeof(g_files) / sizeof(g_files[0]);
 static const int	SECTOR = 2048;
 
-static int	g_inited;
-static long	g_curLBA;
+static int		g_inited;
+static long		g_curLBA;
+static double	g_readDeadline;	/* CD pacing: when the in-flight read "completes" */
+static int		g_pace = -1;	/* -1 unparsed; SBSP_CD_PACE=0 disables */
 
 static void dataPath(char *dst, size_t dstSize, const char *name)
 {
@@ -217,6 +219,7 @@ extern "C" int CdRead(int sectors, u_long *buf, int mode)
 {
 	(void)mode;
 	unsigned char *dst = (unsigned char *)buf;
+	int paced = 0;
 
 	while (sectors > 0)
 	{
@@ -241,16 +244,41 @@ extern "C" int CdRead(int sectors, u_long *buf, int mode)
 		dst += SECTOR;
 		g_curLBA++;
 		sectors--;
+		paced++;
+	}
+
+	/*	CD pacing: the data is already in the buffer, but CdReadSync reports
+		"still reading" until a double-speed drive would have delivered it
+		(150 sectors/s).  This is what gives the loading icon its window -
+		with instant reads, zero vblanks elapse between StartLoad and
+		StopLoad and the game itself skips the icon.  SBSP_CD_PACE=0 turns
+		it off for instant loads.  */
+	if (g_pace < 0)
+	{
+		const char *e = getenv("SBSP_CD_PACE");
+		g_pace = !(e && *e == '0');
+	}
+	if (g_pace)
+	{
+		double now = Port_NowSeconds();
+		if (g_readDeadline < now)
+			g_readDeadline = now;
+		g_readDeadline += (double)paced / 150.0;
 	}
 	return 1;
 }
 
 extern "C" int CdReadSync(int mode, u_char *result)
 {
-	(void)mode;
 	(void)result;
 	Port_Pump();		/* PS1 interrupt-time work happens during reads */
-	return 0;			/* complete */
+	if (mode == 0)
+	{	/* blocking wait */
+		while (Port_NowSeconds() < g_readDeadline)
+			Port_Pump();
+		return 0;
+	}
+	return (Port_NowSeconds() < g_readDeadline) ? 1 : 0;
 }
 
 extern "C" int CdSync(int mode, u_char *result)

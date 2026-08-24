@@ -59,8 +59,19 @@ extern "C" unsigned long Port_VBlankCount(void)
 	return g_vblank;
 }
 
+extern "C" double Port_NowSeconds(void)
+{
+	LARGE_INTEGER now;
+	clockInit();
+	QueryPerformanceCounter(&now);
+	return (double)(now.QuadPart - g_qpcBase.QuadPart) / (double)g_qpcFreq.QuadPart;
+}
+
 extern "C" void Port_Pump(void)
 {
+	extern void Host_VBlank(unsigned long vblankNo);	/* host/window.cpp */
+	extern void Port_RCnt2Vblank(int vblankHz);			/* api/libapi_stubs.cpp */
+
 	unsigned long target = wallVblank();
 
 	/*	after a long stall (debugger, laptop sleep) don't fire thousands of
@@ -72,7 +83,9 @@ extern "C" void Port_Pump(void)
 	{
 		g_vblank++;
 		if (g_vsyncCallback)
-			g_vsyncCallback();
+			g_vsyncCallback();		/* game vblank work first (loading icon...) */
+		Port_RCnt2Vblank(g_hz);
+		Host_VBlank(g_vblank);		/* ...then events + present + tooling */
 	}
 }
 
