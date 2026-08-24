@@ -60,7 +60,6 @@ int LZNP_Encode(unsigned char *Dest, const unsigned char *Src, int insize)
 	while (pos < insize)
 	{
 		int	bestLen = 0, bestOff = 0;
-		int	pairOff = 0;
 
 		int	windowStart = pos - WINDOW;
 		if (windowStart < 0) windowStart = 0;
@@ -74,6 +73,11 @@ int LZNP_Encode(unsigned char *Dest, const unsigned char *Src, int insize)
 			{
 				if (Src[cand] != Src[pos])
 					continue;
+				/* a candidate can only beat bestLen if it also matches at
+				   position bestLen - skipping the rest is output-identical
+				   (nearest-first scan: later ties never replace bestOff) */
+				if (bestLen && Src[cand + bestLen] != Src[pos + bestLen])
+					continue;
 				int len = 1;
 				while (len < maxLen && Src[cand + len] == Src[pos + len])
 					len++;
@@ -84,9 +88,6 @@ int LZNP_Encode(unsigned char *Dest, const unsigned char *Src, int insize)
 					if (len == maxLen)
 						break;
 				}
-				/* nearest pair-range candidate for the 2-byte form */
-				if (!pairOff && len >= 2 && (pos - cand) <= PAIR_WINDOW)
-					pairOff = pos - cand;
 			}
 		}
 
@@ -110,12 +111,6 @@ int LZNP_Encode(unsigned char *Dest, const unsigned char *Src, int insize)
 		{
 			bp.putFlag(1);
 			bp.putByte((unsigned char)(0x100 - bestOff));
-			pos += 2;
-		}
-		else if (pairOff)
-		{	/* longest match was 2 but too far; use the near pair found */
-			bp.putFlag(1);
-			bp.putByte((unsigned char)(0x100 - pairOff));
 			pos += 2;
 		}
 		else

@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 
 	for (int i = 1; i < argc; i++)
 	{
-		if (argv[i][0] == '-' || argv[i][0] == '/')
+		if (argv[i][0] == '-')
 			continue;                       /* -Q etc: ignore */
 		if (!inName)       inName = argv[i];
 		else if (!outName) outName = argv[i];
