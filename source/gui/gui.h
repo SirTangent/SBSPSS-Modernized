@@ -61,6 +61,11 @@ public:
 		BORDERHEIGHT=5,
 	};
 
+	// shutdown() does 'delete this' on a polymorphic hierarchy, so the
+	// destructor must be virtual for the derived parts to be destroyed.
+	// (No class in the hierarchy declares one, so this only fixes the
+	// dispatch; nothing else changes.)
+	virtual				~CGUIObject()	{}
 
 	virtual void		init(CGUIObject *_parent,GUIId _id=noId);
 	virtual void		shutdown();
