@@ -4,8 +4,9 @@
 	gameplay TUs and drive movement/collision everywhere.  Conventions
 	(PSY-Q): angles are 12-bit fixed with ONE==4096 == a full circle;
 	rsin/rcos return 12-bit fixed in [-4096, 4096]; ratan2(y,x) returns an
-	angle in (-2048, 2048]; SquareRoot0 is the integer square root,
-	SquareRoot12 the 20.12 square root.
+	angle in [-2048, 2047] (a half-turn maps to -2048; whether the MIPS
+	libgte returns +2048 there is pinned by M3's emulator fixtures);
+	SquareRoot0 is the integer square root, SquareRoot12 the 20.12 root.
 
 	The sine table is computed once with round-to-nearest - deterministic
 	across runs.  Bit-exactness against the MIPS libgte gets validated in M3

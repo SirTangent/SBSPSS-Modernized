@@ -20,10 +20,10 @@
 #include <stdio.h>
 
 #include "system/types.h"
+#include "system/asmport.h"		/* declares PORT_Scratchpad */
 #include "system/lnkopt.h"
 
-extern "C" unsigned char PORT_Scratchpad[1024];
-__attribute__((aligned(16))) unsigned char PORT_Scratchpad[1024];
+extern "C" { __attribute__((aligned(16))) unsigned char PORT_Scratchpad[1024]; }
 
 LNK_OPTS OPT_LinkerOpts;	/* filled before main() by ArenaBoot below */
 

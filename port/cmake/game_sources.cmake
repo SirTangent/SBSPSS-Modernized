@@ -1,6 +1,7 @@
 # Game translation-unit manifest, generated from the *_src lists in makefile.gaz
-# (the authoritative object list for the vintage CD link). 288 TUs: 287 in the
-# static lib + system/main.cpp split out (its main() would clash with test exes).
+# by port/cmake/gen_game_sources.sh - regenerate with that script, do not edit
+# by hand.  288 TUs: all but system/main.cpp in the static lib (main is split
+# out so test exes can supply their own main()).
 # Dead .cpp files under source/ are deliberately absent - do NOT glob.
 
 set(SBSP_GAME_MAIN_SOURCE ${SBSP_ROOT}/source/system/main.cpp)

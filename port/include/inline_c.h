@@ -23,9 +23,9 @@
 /*	asmport.h declares reads of cop2 DATA registers only (mfc2/swc2).
 	Several vintage macros also read cop2 CONTROL registers (cfc2) --
 	gte_stflg, gte_ReadRotMatrix, gte_ReadGeomOffset, gte_FlipTRX, etc.
-	The software GTE must provide the matching control-register read:
+	GTEport_GetCtrl comes from system/asmport.h with the rest of the
+	software-GTE interface (included above).
 */
-extern "C" u32 GTEport_GetCtrl(int reg);	/* cfc2 read of cop2 CTRL reg */
 
 /*	Private load/store helpers, named after the MIPS instructions they
 	replace so each macro body can be eyeballed against the vintage asm.

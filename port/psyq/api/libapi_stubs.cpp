@@ -10,8 +10,10 @@
 	on i686, so no collision.)
 
 	The event/root-counter set backs system/clickcount.cpp's RCnt2 timer;
-	M1 accepts the registration and never fires it (CClickCount arms itself
-	lazily and nothing in the headless path reads it).
+	M1 accepts the registration and NEVER FIRES it, so CClickCount's
+	timeSinceLast() reads frozen zeros (gstate.cpp then pins framesSinceLast
+	to 1).  Every stub logs so timing work in M2 points back here; driving
+	the fake counter from the pump's QPC clock is the M2 fix.
 */
 #include "stub_log.h"
 
@@ -29,9 +31,9 @@ long OpenEvent(unsigned long desc, long spec, long mode, long (*func)())
 	PSYQ_STUB_ONCE();
 	return 1;	/* fake event handle */
 }
-long CloseEvent(long ev)			{ (void)ev; return 1; }
-long EnableEvent(long ev)			{ (void)ev; return 1; }
-long DisableEvent(long ev)			{ (void)ev; return 1; }
+long CloseEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
+long EnableEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
+long DisableEvent(long ev)			{ (void)ev; PSYQ_STUB_ONCE(); return 1; }
 
 long SetRCnt(unsigned long spec, unsigned short target, long mode)
 {
@@ -39,9 +41,9 @@ long SetRCnt(unsigned long spec, unsigned short target, long mode)
 	PSYQ_STUB_ONCE();
 	return 1;
 }
-long StartRCnt(unsigned long spec)	{ (void)spec; return 1; }
-long StopRCnt(unsigned long spec)	{ (void)spec; return 1; }
-long GetRCnt(unsigned long spec)	{ (void)spec; return 0; }
+long StartRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 1; }
+long StopRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 1; }
+long GetRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 0; }
 
 void FlushCache(void)				{ }
 

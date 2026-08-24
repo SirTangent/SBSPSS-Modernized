@@ -56,11 +56,11 @@ int main()
 		}
 	}
 
-	/* ratan2: octant centres, range (-2048, 2048] */
+	/* ratan2: octant centres, range [-2048, 2047] (half-turn convention
+	   pinned to -2048 until M3 fixtures decide vs the MIPS libgte) */
 	check(ratan2(0, 1000) == 0,      "ratan2(0,+x)",  ratan2(0, 1000), 0);
 	check(ratan2(1000, 0) == 1024,   "ratan2(+y,0)",  ratan2(1000, 0), 1024);
-	check(ratan2(0, -1000) == -2048 || ratan2(0, -1000) == 2048,
-		  "ratan2(0,-x) == half turn", ratan2(0, -1000), 2048);
+	check(ratan2(0, -1000) == -2048, "ratan2(0,-x) == half turn", ratan2(0, -1000), -2048);
 	check(ratan2(-1000, 0) == -1024, "ratan2(-y,0)",  ratan2(-1000, 0), -1024);
 	check(ratan2(1000, 1000) == 512, "ratan2(+y,+x) diagonal", ratan2(1000, 1000), 512);
 	check(ratan2(0, 0) == 0,         "ratan2(0,0)",   ratan2(0, 0), 0);

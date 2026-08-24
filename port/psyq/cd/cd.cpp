@@ -25,10 +25,9 @@
 #include "stub_log.h"
 #include "host/pump.h"
 
-extern "C" unsigned char PORT_Scratchpad[1024];
-extern char INF_Version[];
-extern char INF_Territory[];
-extern char INF_FileSystem[];
+#include "system/types.h"
+#include "system/asmport.h"		/* PORT_Scratchpad */
+#include "system/info.h"		/* INF_Version/Territory/FileSystem */
 
 /*	Virtual disc directory - names and order must match FilenameList in
 	source/fileio/filetab.cpp (FILEPOS_* enum order).  DEMO.STR is EUR-only
@@ -111,8 +110,7 @@ static VirtFile *fileForLBA(long lba)
 namespace { struct CdBoot { CdBoot() { cdBuildDir(); g_inited = 1; } }; static CdBoot g_cdBoot; }
 
 /*****************************************************************************/
-static int itob_(int i)	{ return ((i / 10) << 4) | (i % 10); }
-static int btoi_(int b)	{ return ((b >> 4) * 10) + (b & 15); }
+/*	BCD conversion: use the SDK's own itob/btoi macros from LIBCD.H  */
 
 extern "C" int CdInit(void)
 {
@@ -121,23 +119,37 @@ extern "C" int CdInit(void)
 		cdBuildDir();
 		g_inited = 1;
 	}
+
+	/*	The game cannot run without its data lump; a wrong path must fail
+		HERE, loudly, not as zero-filled reads parsed far from the cause.
+		(The static CdBoot stays soft so data-less tools like gte_trig_test
+		can still link the shim.)  */
+	if (!g_files[0].fp)
+	{
+		char path[512];
+		dataPath(path, sizeof(path), g_files[0].name);
+		fprintf(stderr, "[shim] CdInit: cannot open %s\n"
+						"       run port/build-data.cmd, or point SBSP_DATA_DIR at the directory holding it\n",
+				path);
+		abort();
+	}
 	return 1;
 }
 
 extern "C" CdlLOC *CdIntToPos(int i, CdlLOC *p)
 {
 	i += 150;								/* 2-second lead-in */
-	p->sector = (u_char)itob_(i % 75);
+	p->sector = (u_char)itob(i % 75);
 	i /= 75;
-	p->second = (u_char)itob_(i % 60);
-	p->minute = (u_char)itob_(i / 60);
+	p->second = (u_char)itob(i % 60);
+	p->minute = (u_char)itob(i / 60);
 	p->track  = 0;
 	return p;
 }
 
 extern "C" int CdPosToInt(CdlLOC *p)
 {
-	return ((btoi_(p->minute) * 60 + btoi_(p->second)) * 75 + btoi_(p->sector)) - 150;
+	return ((btoi(p->minute) * 60 + btoi(p->second)) * 75 + btoi(p->sector)) - 150;
 }
 
 extern "C" CdlFILE *CdSearchFile(CdlFILE *fp, char *name)
@@ -211,9 +223,13 @@ extern "C" int CdRead(int sectors, u_long *buf, int mode)
 		VirtFile *vf = fileForLBA(g_curLBA);
 		if (!vf || !vf->fp)
 		{
-			fprintf(stderr, "[shim] CdRead: LBA %ld outside the virtual disc\n", g_curLBA);
-			memset(dst, 0, (size_t)sectors * SECTOR);
-			return 1;
+			/*	Success + zeros here would defeat the callers' entire error
+				path (cdfile.cpp retries while(!Error) forever on 0, and
+				parses whatever we hand it on 1) - a data-configuration
+				problem is unrecoverable, so stop at the cause.  */
+			fprintf(stderr, "[shim] CdRead: LBA %ld maps to no host file "
+							"(missing data file or wrong SBSP_DATA_DIR)\n", g_curLBA);
+			abort();
 		}
 
 		long offset = (g_curLBA - vf->startLBA) * SECTOR;
@@ -265,16 +281,25 @@ extern "C" int CdSetDebug(int level)
 	return 0;
 }
 
+/*	Callback registration is kept, not dropped: CXAStream::XACDReadyCallback
+	(cdxa.cpp:150) is the only writer of XA_MODE_END, so losing it would pin
+	isSpeechPlaying() true forever.  Nothing fires these until the XA/FMV
+	streaming milestones (M6/M7) route sector delivery through the pump.  */
+static CdlCB g_readCallback;
+static CdlCB g_readyCallback;
+
 extern "C" CdlCB CdReadCallback(CdlCB func)
 {
-	(void)func;
-	PSYQ_STUB_ONCE();
-	return NULL;
+	CdlCB old = g_readCallback;
+	g_readCallback = func;
+	PSYQ_STUB_ONCE();	/* registered but not yet fired (M7) */
+	return old;
 }
 
 extern "C" CdlCB CdReadyCallback(CdlCB func)
 {
-	(void)func;
-	PSYQ_STUB_ONCE();
-	return NULL;
+	CdlCB old = g_readyCallback;
+	g_readyCallback = func;
+	PSYQ_STUB_ONCE();	/* registered but not yet fired (M6) */
+	return old;
 }

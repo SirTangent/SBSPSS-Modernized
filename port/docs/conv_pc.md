@@ -78,6 +78,14 @@ only the headers that cannot work on x86:
     `layercollision.cpp:134` (`getHeightFromGroundExcluding`),
     `saveload.cpp:152` (`startSave`), `player.cpp:1732` (`addSpatula`).
 
+12. **`source/system/asmport.h` (post-review)** — the software-GTE contract
+    corrected and completed before freezing: `GTEport_Op` documented as
+    receiving the DMPSX tag words the vintage `INLINE_C.H` macros embed (not
+    the raw 25-bit cop2 immediate the first draft claimed); `GTEport_GetCtrl`
+    (cfc2) moved here from the shadow `inline_c.h` so the interface has one
+    home; `PORT_Scratchpad` declared here (portable branch only) so game code
+    and shim share one declaration instead of three raw externs.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

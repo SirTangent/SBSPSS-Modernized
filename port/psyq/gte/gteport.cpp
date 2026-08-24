@@ -5,7 +5,8 @@
 	M1 scope: a passive register file - loads land in registers, stores read
 	them back, operations log once and do nothing.  The real cop2 emulation
 	(RTPS/RTPT/NCLIP/SQR/AVSZ/... with PS1 flag semantics) is milestone M3;
-	freezing the interface now is the point.
+	freezing the interface now is the point.  NOTE the M3 decoder consumes
+	DMPSX tag words, not raw cop2 immediates - see asmport.h's contract.
 */
 #include "system/types.h"
 #include "stub_log.h"

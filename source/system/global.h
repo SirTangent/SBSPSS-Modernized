@@ -31,7 +31,6 @@
 #ifdef	PSX_MIPS_ASM
 #define SCRATCH_RAM 		0x1f800000
 #else
-extern "C" unsigned char	PORT_Scratchpad[1024];
 #define SCRATCH_RAM 		((unsigned char*)PORT_Scratchpad)
 #endif
 #define	FAST_STACK			(SCRATCH_RAM+0x3f0)

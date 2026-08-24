@@ -13,9 +13,7 @@
 #define SBSP_INFO_FILESYSTEM	"CD"
 #endif
 
-extern char INF_Version[];
-extern char INF_Territory[];
-extern char INF_FileSystem[];
+#include "system/info.h"
 
 char INF_Version[]    = SBSP_INFO_VERSION;
 char INF_Territory[]  = SBSP_INFO_TERRITORY;

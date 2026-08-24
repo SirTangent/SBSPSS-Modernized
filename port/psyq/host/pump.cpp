@@ -19,6 +19,7 @@ int  VSyncCallback(void (*f)(void));
 static void			(*g_vsyncCallback)(void);
 static unsigned long	g_vblank;			/* emulated vblank counter */
 static unsigned long	g_lastVSyncVblank;
+static unsigned long	g_vblankBase;		/* wall count at the last rate change */
 static int				g_hz = 60;
 static LARGE_INTEGER	g_qpcFreq;
 static LARGE_INTEGER	g_qpcBase;
@@ -39,11 +40,17 @@ static unsigned long wallVblank(void)
 	LARGE_INTEGER now;
 	clockInit();
 	QueryPerformanceCounter(&now);
-	return (unsigned long)(((now.QuadPart - g_qpcBase.QuadPart) * g_hz) / g_qpcFreq.QuadPart);
+	return g_vblankBase +
+		   (unsigned long)(((now.QuadPart - g_qpcBase.QuadPart) * g_hz) / g_qpcFreq.QuadPart);
 }
 
 extern "C" void Port_SetVBlankHz(int hz)
 {
+	/*	rebase the epoch so already-elapsed wall time is not retroactively
+		reinterpreted at the new rate (60->50 would stall VSync until the
+		wall clock caught back up; 50->60 would burst callbacks)  */
+	g_vblankBase = wallVblank();
+	QueryPerformanceCounter(&g_qpcBase);
 	g_hz = (hz == 50) ? 50 : 60;
 }
 
@@ -55,6 +62,12 @@ extern "C" unsigned long Port_VBlankCount(void)
 extern "C" void Port_Pump(void)
 {
 	unsigned long target = wallVblank();
+
+	/*	after a long stall (debugger, laptop sleep) don't fire thousands of
+		catch-up callbacks - drop the missed vblanks and replay a few  */
+	if (target > g_vblank + 8)
+		g_vblank = target - 8;
+
 	while (g_vblank < target)
 	{
 		g_vblank++;

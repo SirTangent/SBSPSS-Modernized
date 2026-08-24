@@ -12,7 +12,9 @@ set -e
 cd "$(dirname "$0")"
 
 # cc1plus/ninja need the mingw32 runtime DLLs on PATH.
-export PATH="/c/msys64/mingw32/bin:$PATH"
+# Override MSYS2_ROOT (POSIX-style path) for a non-default MSYS2 install.
+MSYS2_ROOT="${MSYS2_ROOT:-/c/msys64}"
+export PATH="$MSYS2_ROOT/mingw32/bin:$PATH"
 
 what="${1:-all}"
 shift 2>/dev/null || true
