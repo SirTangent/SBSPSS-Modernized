@@ -131,7 +131,7 @@ u8	*MapPtr,T;
 }
 
 /*****************************************************************************/
-int			CLayerCollision::getHeightFromGroundExcluding(int _x,int _y,int _exclusion,int _maxHeight=32)
+int			CLayerCollision::getHeightFromGroundExcluding(int _x,int _y,int _exclusion,int _maxHeight)
 {
 int	xFraction,yFraction;
 int	distanceFromGround;

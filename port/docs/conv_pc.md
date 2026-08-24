@@ -66,6 +66,18 @@ only the headers that cannot work on x86:
    and in C++ the empty parens mean zero-arg.  Matches the MIPS `VLC_BIT.O`
    ABI (table pointer in `$a0`).
 
+10. **No-op `typedef` keywords dropped** (13 sites): `typedef struct/enum NAME
+    {...};` with no declarator name — the keyword was silently ignored by EGCS
+    and warned per-including-TU by modern GCC (~2000 warnings).
+    `source/sound/xmplay.h:115,123`, `source/sound/sound.h:44,57,62,189,201,207`,
+    `source/sound/spu.h:32`, `source/gfx/bubicles.h:47`,
+    `source/sound/sound.cpp:54,61,65`.
+
+11. **Default arguments repeated on definitions removed** (4 more sites, same
+    class as #6; the declarations keep them): `sound.cpp:638` (`playSfx`),
+    `layercollision.cpp:134` (`getHeightFromGroundExcluding`),
+    `saveload.cpp:152` (`startSave`), `player.cpp:1732` (`addSpatula`).
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
@@ -76,8 +88,17 @@ only the headers that cannot work on x86:
   the game's `new ("name") T` and plain `new T` correctly under gnu++98.
 - Backslash `#include` paths and mixed-case generated-header names (NTFS).
 
-## Residual PC-only diagnostics worth knowing about
+## Warning policy (PC game target)
 
-- `-Wnarrowing` warnings (C++11-hostile `{int → short}` initialisers) — a
-  handful across the tree, warnings only under gnu++98.
-- `xmplay.h:115` "typedef was ignored" — vintage header quirk, harmless.
+Style classes pervasive in the 1999 code are suppressed on the game target
+only (see `SBSP_GAME_CXX_FLAGS` in `port/CMakeLists.txt`): narrowing,
+overloaded-virtual, non-c-typedef-for-linkage, parentheses, char-subscripts,
+sign-compare, misleading-indentation, int-in-bool-context, dangling-else,
+header-guard, unused, write-strings.  The shim keeps plain `-Wall`.
+
+The ~14 warnings that remain are kept deliberately visible as bug-smells to
+revisit in later milestones: `-Wreturn-local-addr` ×2 (objThinkBox),
+`-Wmaybe-uninitialized` ×4 (level/chapter), `-Warray-bounds` ×5 (accesses
+into the zero-length `DataBank[0]` — unreachable while `DATABANK_MAX==0`),
+`-Wdelete-non-virtual-dtor` (CGUIObject), one fn-pointer conversion and one
+unnamed-enum linkage note.

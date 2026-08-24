@@ -112,7 +112,7 @@ private:
 	} CHANNELUSETYPE;
 
 	// Internal representation of loaded mods
-	typedef struct XMMod
+	struct XMMod
 	{
 		unsigned char	*m_xmData;
 		FileEquate		m_file;
@@ -120,7 +120,7 @@ private:
 	};
 
 	// Internal representation of loaded vabs
-	typedef struct XMVab
+	struct XMVab
 	{
 		int				m_vabId;
 		FileEquate		m_vhFile,m_vbFile;

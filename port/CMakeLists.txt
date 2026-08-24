@@ -55,6 +55,19 @@ set(SBSP_GAME_CXX_FLAGS
     -Wall
     -Wno-unused
     -Wno-write-strings
+    # style noise pervasive in the 1999 code - suppressed on the game target
+    # only; genuine bug-smell classes (-Wmaybe-uninitialized,
+    # -Wreturn-local-addr, -Wdelete-non-virtual-dtor) stay visible
+    -Wno-narrowing
+    -Wno-overloaded-virtual
+    -Wno-non-c-typedef-for-linkage
+    -Wno-parentheses
+    -Wno-char-subscripts
+    -Wno-sign-compare
+    -Wno-misleading-indentation
+    -Wno-int-in-bool-context
+    -Wno-dangling-else
+    -Wno-header-guard
     -g
     -O2
 )

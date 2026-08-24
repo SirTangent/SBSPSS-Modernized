@@ -1729,7 +1729,7 @@ void CPlayer::addLife()
 	Params:
 	Returns:
   ---------------------------------------------------------------------- */
-void CPlayer::addSpatula(int Count=1)
+void CPlayer::addSpatula(int Count)
 {
 	m_numSpatulasHeld+=Count;
 
