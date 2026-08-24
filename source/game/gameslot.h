@@ -184,6 +184,10 @@ public:
 		void			getHighestLevelOpen(int *_chapter,int *_level)
 		{
 			int	chapter,level;
+			// nothing open yet => chapter 1 level 1 (the loops below only
+			// write the out-params when they find an open level)
+			*_chapter=0;
+			*_level=0;
 			for(chapter=0;chapter<NUM_CHAPTERS;chapter++)
 			{
 				for(level=0;level<NUM_LEVELS_PER_CHAPTER_WITH_QUEST_ITEMS;level++)

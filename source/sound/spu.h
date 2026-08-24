@@ -29,7 +29,7 @@
 	Structure defintions
 	-------------------- */
 
-typedef struct ReverbDetails
+struct ReverbDetails
 {
 	long			m_type;
 	long			m_delay;

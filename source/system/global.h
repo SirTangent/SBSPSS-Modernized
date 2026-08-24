@@ -22,7 +22,17 @@
 #include 	<gtemac.h>
 
 /*****************************************************************************/
+/*	The PS1 scratchpad is 1KB of fast RAM at a fixed physical address.  The
+	PC port supplies a real 1KB buffer instead (defined by the PsyQ shim);
+	several users cast SCRATCH_RAM in namespace-scope initialisers, so it
+	must stay an address-constant expression.
+*/
+#include	"system\asmport.h"
+#ifdef	PSX_MIPS_ASM
 #define SCRATCH_RAM 		0x1f800000
+#else
+#define SCRATCH_RAM 		((unsigned char*)PORT_Scratchpad)
+#endif
 #define	FAST_STACK			(SCRATCH_RAM+0x3f0)
 
 /*****************************************************************************/

@@ -381,8 +381,15 @@ void	CFileIO::LoadASyncFiles()
 /*****************************************************************************/
 /*** Data Banks **************************************************************/
 /*****************************************************************************/
+/*	DATABANK_MAX is 0 (the databank list in this file is commented out), so
+	DataBank[] is a zero-length array and the bodies below would index out of
+	bounds.  Nothing in the game calls either function; the guards make that
+	explicit and let the dead indexing fold away.
+*/
 void	CFileIO::loadDataBank(DataBankEquate Bank)
 {
+		if (DATABANK_MAX==0) return;
+
 // Check if already loaded
 		if (DataBank[Bank].Data) return;
 
@@ -396,6 +403,8 @@ void	CFileIO::loadDataBank(DataBankEquate Bank)
 /*****************************************************************************/
 void	CFileIO::dumpDataBank()
 {
+		if (DATABANK_MAX==0) return;
+
 // Check if loaded
 		ASSERT(CurrentDataBank!=DATABANK_MAX);
 		MemFree(DataBank[CurrentDataBank].Data);

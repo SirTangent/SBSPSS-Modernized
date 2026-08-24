@@ -15,7 +15,7 @@ public:
 		CAnimTex();
 		~CAnimTex();
 		
-static	void	AddAnimTex(sFrameHdr *Frame,int Frame,FileEquate Filename);
+static	void	AddAnimTex(sFrameHdr *Frame,int FrameNo,FileEquate Filename);
 static	void	AnimateTex();
 static	void	GetTexData();
 static	void	DumpThisTPage(FileEquate TexName);

@@ -41,7 +41,7 @@
 class CSoundMediator
 {
 public:
-	typedef enum SONGID
+	enum SONGID
 	{
 		SONG_TITLE,			SONG_OPTIONS,		SONG_MEMORYCARD,	SONG_GAMECOMPLETE,	SONG_GAMEOVER,	SONG_PARTY,			SONG_MEMCARD2,		SONG_MAPSCREEN,		SONG_SHOPSCREEN,
 		SONG_FMA,
@@ -54,12 +54,12 @@ public:
 		NUM_SONGIDS,
 	};
 
-	typedef enum SFXBANKID
+	enum SFXBANKID
 	{
 		SFX_INGAME,
 		NUM_SFXBANKIDS,
 	};
-	typedef enum SFXID
+	enum SFXID
 	{
 		SFX_SPONGEBOB_WALK_1,			SFX_SPONGEBOB_WALK_2,
 		SFX_SPONGEBOB_SQUEAKY_SHOES_1,	SFX_SPONGEBOB_SQUEAKY_SHOES_2,
@@ -186,7 +186,7 @@ public:
 		NUM_SFXIDS
 	};
 
-	typedef enum VOLUMETYPE
+	enum VOLUMETYPE
 	{
 		VOL_SONG,
 		VOL_SFX,
@@ -198,13 +198,13 @@ public:
 		NUM_VOLUMETYPESTOSAVE=VOL_SPEECH,
 	};
 
-	typedef enum
+	enum
 	{
 		MIN_VOLUME=0,
 		MAX_VOLUME=255,
 	};
 
-	typedef enum REVERBTYPE
+	enum REVERBTYPE
 	{
 		REV_NONE,
 		REV_ECHOTEST,

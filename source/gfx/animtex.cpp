@@ -59,6 +59,9 @@ CAnimTex	*ThisTex=new ("CAnimTex::AddAnimTex") CAnimTex;
 				ThisTex->PixPerWord=1;
 				break;
 			default:
+				// ASSERT compiles away in FINAL, so PixPerWord must still
+				// get a safe divisor here (it divides X and W below).
+				ThisTex->PixPerWord=1;
 				ASSERT(!"Unknown Pixel Depth");
 				break;
 			};

@@ -51,18 +51,18 @@ adjust channels ( watery-mario64 style music changes )
 	Structure defintions
 	-------------------- */
 
-typedef struct XMSONGDATA
+struct XMSONGDATA
 {
 	FileEquate	m_vh,m_vb,m_pxm;
 	int			m_startPattern;
 };
 
 
-typedef struct XMSFXFILEDATA
+struct XMSFXFILEDATA
 {
 	FileEquate	m_vh,m_vb,m_pxm;
 };
-typedef struct SFXDETAILS
+struct SFXDETAILS
 {
 	int			m_channelMask;
 	int			m_pattern;			// ..or instrument number for loopers
@@ -635,7 +635,7 @@ void CSoundMediator::setSfxBank(SFXBANKID _bankId)
 				same time as *lots* of other sfx.
 	Returns:
   ---------------------------------------------------------------------- */
-xmPlayingId CSoundMediator::playSfx(SFXID _sfxId,int _lock=false,int _dontPlayIfSFXAlreadyAudible=false)
+xmPlayingId CSoundMediator::playSfx(SFXID _sfxId,int _lock,int _dontPlayIfSFXAlreadyAudible)
 {
 	if(!s_canPlaySfx)
 	{

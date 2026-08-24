@@ -83,7 +83,7 @@
 	Structure defintions
 	-------------------- */
 
-enum
+enum CREDIT_CONTROL
 {
 	CC_BIG_TITLE,
 	CC_TITLE,
@@ -91,7 +91,7 @@ enum
 	CC_BLANK_LINE,
 	CC_END_OF_PAGE,
 	CC_END_OF_CREDITS,
-}CREDIT_CONTROL;
+};
 
 
 /*----------------------------------------------------------------------

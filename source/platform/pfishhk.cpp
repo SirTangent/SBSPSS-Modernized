@@ -170,7 +170,11 @@ void CNpcFishHookPlatform::render()
 
 const CRECT *CNpcFishHookPlatform::getThinkBBox()
 {
-	CRECT objThinkBox = getCollisionArea();
+	// static: the caller reads through this pointer immediately (as the
+	// base class does with its member m_collisionArea) - returning the
+	// address of an automatic was always a dangling read.
+	static CRECT objThinkBox;
+	objThinkBox = getCollisionArea();
 
 	sBBox &thinkBBox = CThingManager::getThinkBBox();
 	objThinkBox.y2 = thinkBBox.YMin + 1;

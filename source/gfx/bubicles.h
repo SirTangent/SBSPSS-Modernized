@@ -44,7 +44,7 @@
 // An individual particle and it's associated data
 //
 
-typedef struct RGBPack
+struct RGBPack
 {
 	u8				m_r,m_g,m_b;
 };

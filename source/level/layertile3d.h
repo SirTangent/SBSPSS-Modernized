@@ -21,10 +21,12 @@
 
 #else	/* PSX_MIPS_ASM */
 
-/*	Portable equivalent: ctrl regs 0,2 = packed R11R12 and R22R23 pairs */
+/*	Portable equivalent: ctrl regs 0,2 = packed R11R12 and R22R23 pairs.
+	Reads s16 Mtx[4] as two packed 32-bit words like the original lw pairs
+	(reinterpreting read: the game target builds -fno-strict-aliasing).  */
 inline void	CMX_SetRotMatrixXYF(const void *r0)
 {
-const unsigned long	*w=(const unsigned long*)r0;
+const u32	*w=(const u32*)r0;
 	GTEport_SetCtrl(0,w[0]);
 	GTEport_SetCtrl(2,w[1]);
 }

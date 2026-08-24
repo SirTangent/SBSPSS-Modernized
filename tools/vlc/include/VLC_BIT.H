@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 // Setup function, this builds the bit decode table in scratchpad ram
-void DecDCTvlcBuild3();
+void DecDCTvlcBuild3( unsigned short *table );
 
 // Break size function, set 0 for no partial decode
 int DecDCTvlcSize3( int breaksize );

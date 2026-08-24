@@ -26,12 +26,24 @@ BUILD_PATH="/usr/bin:$PWD/port/tools:$PWD/tools:$PWD/tools/psyq/bin:$PWD/tools/p
 # Targets 'dirs link' only: the full 'all' also runs 'cddata' (CPE->BIN,
 # buildcd, ISO), which needs 16-bit tools (cpe2bin) and only matters for
 # pressing a physical disc - the port consumes the linked output directly.
-make -r -f makefile.gaz \
+if ! make -r -f makefile.gaz \
     VERSION="$VERSION" TERRITORY="$TERRITORY" USER_NAME=CDBUILD \
     "PATH=$BUILD_PATH" "Path=$BUILD_PATH" \
     "PSYQ_PATH=$PWD/tools/psyq/bin/egcs" \
     MKDIR=mkdir ECHO=echo MV=mv DATE=date SED=sed \
     RMDIR=rmdir LS=ls "ATTRIB=chmod +w" \
     dirs link
+then
+    echo "PSX BUILD FAILED" >&2
+    exit 1
+fi
 
-echo "PSX build complete: out/$TERRITORY/$VERSION/version/CD/Spongey.cpe"
+# Never report success without the artifact: a login shell can swallow the
+# make exit status, which once let a broken regression build look clean.
+CPE="out/$TERRITORY/$VERSION/version/CD/Spongey.cpe"
+if [ ! -f "$CPE" ]; then
+    echo "PSX BUILD FAILED: $CPE was not produced" >&2
+    exit 1
+fi
+
+echo "PSX build complete: $CPE"

@@ -61,7 +61,13 @@ void CClickCount::initialise()
 	// set up variables and environment
 
 	EnterCriticalSection();
+	// LIBAPI.H declares the handler as long(*)(); EGCS insists on the old
+	// (...) spelling for the cast, modern GCC rejects that same spelling.
+#ifdef	PSX_MIPS_ASM
 	eventHandle = OpenEvent( RCntCNT2, EvSpINT, EvMdINTR,(long (*)(...)) clockTicker);
+#else
+	eventHandle = OpenEvent( RCntCNT2, EvSpINT, EvMdINTR,(long (*)()) clockTicker);
+#endif
 	EnableEvent( eventHandle );
 //	SetRCnt( RCntCNT2, COUNT_DOWN_VAL, RCntMdINTR|RCntMdSP);
 	SetRCnt( RCntCNT2, COUNT_DOWN_VAL, RCntMdINTR);

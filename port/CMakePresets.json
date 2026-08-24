@@ -1,0 +1,32 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/mingw32-toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_MAKE_PROGRAM": "C:/msys64/mingw32/bin/ninja.exe"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "USA DEBUG (CD)",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": { "SBSP_VARIANT": "DEBUG" }
+        },
+        {
+            "name": "final",
+            "displayName": "USA FINAL (CD)",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build/final",
+            "cacheVariables": { "SBSP_VARIANT": "FINAL" }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug", "configurePreset": "debug" },
+        { "name": "final", "configurePreset": "final" }
+    ]
+}

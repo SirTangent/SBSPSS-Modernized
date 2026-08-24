@@ -68,36 +68,34 @@
 	Data regs: 9,10,11 = IR1,IR2,IR3; 25,26,27 = MAC1,MAC2,MAC3.
 	Ctrl regs: 5,6 = TRX,TRY.
 */
+/*	The magnitude stores write through the caller's own pointer (callers pass
+	&local where the local is int or u32), so the store is always exactly the
+	width and type of the destination object.
+*/
 // Get the summed magnitude of the vector XYZ (after sqr)
-inline void	CMX_StVecXYZMagF(long *r0)
-{
-	*r0=(long)(GTEport_GetData(25)+GTEport_GetData(26)+GTEport_GetData(27));
-}
-#define CMX_StVecXYZMag(r0)		CMX_StVecXYZMagF((long*)(r0))
+#define CMX_StVecXYZMag(r0)		(*(r0)=(GTEport_GetData(25)+GTEport_GetData(26)+GTEport_GetData(27)))
 
 /*---------------------------------------------------------------------------*/
 // Get the summed magnitude of the vector XZ (after sqr)
-inline void	CMX_StVecXZMagF(long *r0)
-{
-	*r0=(long)(GTEport_GetData(25)+GTEport_GetData(27));
-}
-#define CMX_StVecXZMag(r0)		CMX_StVecXZMagF((long*)(r0))
+#define CMX_StVecXZMag(r0)		(*(r0)=(GTEport_GetData(25)+GTEport_GetData(27)))
 
 /*---------------------------------------------------------------------------*/
 // Load IR0,IR1,IR2 with values (for SQR)
-#define CMX_ldXYZ(r0,r1,r2)		(GTEport_SetData(9,(unsigned long)(r0)),	\
-								 GTEport_SetData(10,(unsigned long)(r1)),	\
-								 GTEport_SetData(11,(unsigned long)(r2)))
+#define CMX_ldXYZ(r0,r1,r2)		(GTEport_SetData(9,(u32)(r0)),	\
+								 GTEport_SetData(10,(u32)(r1)),	\
+								 GTEport_SetData(11,(u32)(r2)))
 
 /*---------------------------------------------------------------------------*/
 // Load IR0,IR1,IR2 with values (for SQR)
-#define CMX_ldXZ(r0,r1)			(GTEport_SetData(9,(unsigned long)(r0)),	\
-								 GTEport_SetData(11,(unsigned long)(r1)))
+#define CMX_ldXZ(r0,r1)			(GTEport_SetData(9,(u32)(r0)),	\
+								 GTEport_SetData(11,(u32)(r1)))
 
 /*****************************************************************************/
+/*	Reads two packed 32-bit words (VECTOR vx,vy) like the original lw pairs.
+	Reinterpreting read: the game target builds -fno-strict-aliasing.  */
 inline void	CMX_SetTransMtxXYF(const void *r0)
 {
-const unsigned long	*w=(const unsigned long*)r0;
+const u32	*w=(const u32*)r0;
 	GTEport_SetCtrl(5,w[0]);
 	GTEport_SetCtrl(6,w[1]);
 }
