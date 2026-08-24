@@ -15,7 +15,8 @@ cd "$(dirname "$0")/.."
 TERRITORY="${1:-USA}"
 VERSION="${2:-DEBUG}"
 
-[ -f sn.ini ] || cp tools/psyq/bin/egcs/sn.ini sn.ini
+# Always refresh: the toolchain copy is authoritative.
+cp -f tools/psyq/bin/egcs/sn.ini sn.ini
 
 # The PSY-Q tools take DOS-style /flags; stop MSYS2 from rewriting them as paths.
 export MSYS2_ARG_CONV_EXCL='*'
