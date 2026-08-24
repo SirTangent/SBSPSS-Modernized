@@ -19,16 +19,20 @@
 #endif
 
 #ifndef	PSX_MIPS_ASM
+#include "system/types.h"
 /*	Software-GTE register interface.  The portable equivalents of the
-	coprocessor-2 macros funnel through these three calls, which a PC port
-	must implement in its software GTE.  Register numbers are the raw cop2
-	register numbers from the original asm (mfc2/mtc2 = data, ctc2 = control).
+	coprocessor-2 macros funnel through these calls, which a PC port must
+	implement in its software GTE.  Register numbers are the raw cop2
+	register numbers from the original asm (mfc2/mtc2 = data, ctc2 = control);
+	GTEport_Op takes the 25-bit cop2 command word (the immediate field of the
+	original cop2 instruction, e.g. 0x0280030 for rtpt).
 */
 extern "C"
 {
-unsigned long	GTEport_GetData(int reg);					/* mfc2 */
-void			GTEport_SetData(int reg,unsigned long v);	/* mtc2 */
-void			GTEport_SetCtrl(int reg,unsigned long v);	/* ctc2 */
+u32		GTEport_GetData(int reg);			/* mfc2 */
+void	GTEport_SetData(int reg,u32 v);		/* mtc2 */
+void	GTEport_SetCtrl(int reg,u32 v);		/* ctc2 */
+void	GTEport_Op(u32 op);					/* cop2 command */
 }
 #endif
 
