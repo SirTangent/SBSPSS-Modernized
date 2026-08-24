@@ -68,6 +68,7 @@
 		$OUTFILE= ">$outFile";
 
 		open(OUTFILE) || die "Can't open file $outFile; $!";
+		binmode(OUTFILE,":crlf");	# transtext.exe requires CRLF lines (it chops the last char of every line)
 
 		foreach $Id (keys(%idToTrans))
 			{
@@ -99,6 +100,7 @@ sub readTransFile
 
 	while (<INFILE>)
 		{
+		s/\r\n$/\n/;			# tolerate CRLF input under modern perl (no :crlf layer)
 		if (/^\[(.*)]\n/)
 			{
 			$id=$1;
@@ -112,6 +114,7 @@ sub readTransFile
 			while (!$Done)
 				{
 				$_=<INFILE>;
+				$_ =~ s/\r\n$/\n/;	# tolerate CRLF input under modern perl
 				chop $_;
 				s/;.*//g;
 

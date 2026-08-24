@@ -1,0 +1,7 @@
+# Build outputs and local debris (Win11 port work)
+out/
+data/Scripts/defs/trans.scr
+*.stackdump
+.idea/
+nul
+sn.ini
