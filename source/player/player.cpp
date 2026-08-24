@@ -1683,7 +1683,7 @@ int CPlayer::getHeightFromPlatformNoGround(int _x,int _y,int _maxHeight)
 	Params:
 	Returns:
   ---------------------------------------------------------------------- */
-int CPlayer::getHeightFromGroundNoPlatform(int _x,int _y,int _maxHeight=32)
+int CPlayer::getHeightFromGroundNoPlatform(int _x,int _y,int _maxHeight)
 {
 	return( CGameScene::getCollision()->getHeightFromGround(_x,_y,_maxHeight) );
 }

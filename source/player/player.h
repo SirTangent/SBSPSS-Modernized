@@ -263,7 +263,7 @@ public:
 	DVECTOR			*getMoveVelocity()									{return &m_moveVelocity;}
 	void			setMoveVelocity(const DVECTOR *_moveVelocity)		{m_moveVelocity=*_moveVelocity;}
 //--- Prompt Stuff
-private:
+public:		// player.cpp defines the prompt tables at namespace scope
 	struct	sPromptData
 	{
 		u16					m_input;
@@ -274,6 +274,7 @@ private:
 		const sPromptData	*Data;
 		int					Shown;
 	};
+private:
 
 	void			promptThink(int _frames);
 	void			promptRender();
@@ -352,7 +353,7 @@ private:
 	{
 		int							m_animNumber;
 		int							m_numAnimFrameSfx;
-		const struct AnimFrameSfx	*m_animFrameSfx;
+		const AnimFrameSfx			*m_animFrameSfx;
 	} AnimSfx;
 	static const AnimSfx	s_animSfx[];
 	static const int		s_numAnimSfx;

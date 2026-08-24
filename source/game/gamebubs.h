@@ -50,7 +50,7 @@ public:
 	static void		spawnBubicles(int _x,int _y,int _w,int _h,GAMEBUBICLETYPE _type);
 
 private:
-	static struct BubicleEmitterData	s_emitters[NUM_TYPES];
+	static BubicleEmitterData	s_emitters[NUM_TYPES];
 
 };
 
