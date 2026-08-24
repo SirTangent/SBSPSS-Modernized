@@ -8,7 +8,8 @@
 # and the M0 generated headers (run port/build-data.cmd first).
 
 set -e
-cd "$(dirname "$0")/.."
+# presets live in port/, and cmake resolves --preset from the cwd
+cd "$(dirname "$0")"
 
 # cc1plus/ninja need the mingw32 runtime DLLs on PATH.
 export PATH="/c/msys64/mingw32/bin:$PATH"
@@ -20,7 +21,7 @@ build_one()
 {
     preset="$1"
     echo "=== configure+build: $preset ==="
-    cmake --preset "$preset" -S port
+    cmake --preset "$preset"
     cmake --build --preset "$preset" "$@"
 }
 
