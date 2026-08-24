@@ -1,0 +1,280 @@
+/*	libcd over the host filesystem: the M1 synchronous subset.
+
+	Model: a virtual disc directory of the files filetab.cpp knows about
+	(BIGLUMP.BIN, TRACK1.IXA, *.STR), each with a fabricated LBA range;
+	BIGLUMP.BIN sits at LBA 0 so that with FileStart==0 BigLump sector N maps
+	to byte N*2048 of the host file - exactly what CCDFileIO expects.
+
+	This shim also plays PsxBoot's role: on the retail (__USER_CDBUILD__)
+	build, filetab.cpp is compiled out and the game reads its file-position
+	table from the scratchpad (CFileIO::GetAllFilePos), which the boot
+	program pre-filled on real hardware.  Here a static initialiser fills
+	PORT_Scratchpad with the virtual LBAs before main() runs.
+
+	Reads are synchronous; CdReadSync pumps the vblank clock once so
+	callback-time work (loading icon, XM_Update in later milestones) still
+	happens "during" loads.
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <sys/types.h>
+#include <libcd.h>
+
+#include "stub_log.h"
+#include "host/pump.h"
+
+extern "C" unsigned char PORT_Scratchpad[1024];
+extern char INF_Version[];
+extern char INF_Territory[];
+extern char INF_FileSystem[];
+
+/*	Virtual disc directory - names and order must match FilenameList in
+	source/fileio/filetab.cpp (FILEPOS_* enum order).  DEMO.STR is EUR-only
+	but harmlessly present here.
+*/
+struct VirtFile
+{
+	const char	*name;
+	long		startLBA;
+	long		sizeBytes;		/* 0 if the host file is absent */
+	FILE		*fp;
+};
+
+static VirtFile g_files[] =
+{
+	{ "BIGLUMP.BIN", 0, 0, NULL },
+	{ "TRACK1.IXA",  0, 0, NULL },
+	{ "THQ.STR",     0, 0, NULL },
+	{ "CLIMAX.STR",  0, 0, NULL },
+	{ "INTRO.STR",   0, 0, NULL },
+	{ "DEMO.STR",    0, 0, NULL },
+};
+static const int	g_fileCount = sizeof(g_files) / sizeof(g_files[0]);
+static const int	SECTOR = 2048;
+
+static int	g_inited;
+static long	g_curLBA;
+
+static void dataPath(char *dst, size_t dstSize, const char *name)
+{
+	const char *root = getenv("SBSP_DATA_DIR");
+	if (root)
+		snprintf(dst, dstSize, "%s/%s", root, name);
+	else
+		snprintf(dst, dstSize, "out/%s/%s/version/%s/%s",
+				 INF_Territory, INF_Version, INF_FileSystem, name);
+}
+
+static void cdBuildDir(void)
+{
+	long lba = 0;
+	for (int i = 0; i < g_fileCount; i++)
+	{
+		char path[512];
+		dataPath(path, sizeof(path), g_files[i].name);
+		FILE *f = fopen(path, "rb");
+		long size = 0;
+		if (f)
+		{
+			fseek(f, 0, SEEK_END);
+			size = ftell(f);
+		}
+		g_files[i].fp        = f;
+		g_files[i].sizeBytes = size;
+		g_files[i].startLBA  = lba;
+		long sectors = (size + SECTOR - 1) / SECTOR;
+		if (sectors < 16) sectors = 16;			/* keep ranges distinct */
+		lba += (sectors + 15) & ~15;			/* 16-sector aligned */
+	}
+
+	/*	PsxBoot protocol: int FilePosList[FILEPOS_MAX] at the scratchpad,
+		each entry CdPosToInt() of the file's start position (== start LBA).
+		FILEPOS_MAX is 5 on USA, 6 on EUR; writing all 6 is harmless.  */
+	int *pos = (int *)PORT_Scratchpad;
+	for (int i = 0; i < g_fileCount; i++)
+		pos[i] = (int)g_files[i].startLBA;
+}
+
+static VirtFile *fileForLBA(long lba)
+{
+	for (int i = 0; i < g_fileCount; i++)
+	{
+		long sectors = (g_files[i].sizeBytes + SECTOR - 1) / SECTOR;
+		if (lba >= g_files[i].startLBA && lba < g_files[i].startLBA + sectors)
+			return &g_files[i];
+	}
+	return NULL;
+}
+
+namespace { struct CdBoot { CdBoot() { cdBuildDir(); g_inited = 1; } }; static CdBoot g_cdBoot; }
+
+/*****************************************************************************/
+static int itob_(int i)	{ return ((i / 10) << 4) | (i % 10); }
+static int btoi_(int b)	{ return ((b >> 4) * 10) + (b & 15); }
+
+extern "C" int CdInit(void)
+{
+	if (!g_inited)
+	{
+		cdBuildDir();
+		g_inited = 1;
+	}
+	return 1;
+}
+
+extern "C" CdlLOC *CdIntToPos(int i, CdlLOC *p)
+{
+	i += 150;								/* 2-second lead-in */
+	p->sector = (u_char)itob_(i % 75);
+	i /= 75;
+	p->second = (u_char)itob_(i % 60);
+	p->minute = (u_char)itob_(i / 60);
+	p->track  = 0;
+	return p;
+}
+
+extern "C" int CdPosToInt(CdlLOC *p)
+{
+	return ((btoi_(p->minute) * 60 + btoi_(p->second)) * 75 + btoi_(p->sector)) - 150;
+}
+
+extern "C" CdlFILE *CdSearchFile(CdlFILE *fp, char *name)
+{
+	/*	filetab.cpp searches "\NAME;1" - strip the path and version chars  */
+	const char *base = name;
+	while (*base == '\\' || *base == '/')
+		base++;
+
+	char clean[32];
+	size_t n = 0;
+	while (base[n] && base[n] != ';' && n < sizeof(clean) - 1)
+	{
+		clean[n] = base[n];
+		n++;
+	}
+	clean[n] = 0;
+
+	for (int i = 0; i < g_fileCount; i++)
+	{
+		if (_stricmp(clean, g_files[i].name) == 0)
+		{
+			CdIntToPos((int)g_files[i].startLBA, &fp->pos);
+			fp->size = (u_long)g_files[i].sizeBytes;
+			strncpy(fp->name, g_files[i].name, sizeof(fp->name) - 1);
+			fp->name[sizeof(fp->name) - 1] = 0;
+			return fp;
+		}
+	}
+	fprintf(stderr, "[shim] CdSearchFile: unknown file '%s'\n", clean);
+	return NULL;
+}
+
+extern "C" int CdControl(u_char com, u_char *param, u_char *result)
+{
+	return CdControlB(com, param, result);
+}
+
+extern "C" int CdControlB(u_char com, u_char *param, u_char *result)
+{
+	(void)result;
+	switch (com)
+	{
+	case CdlSetloc:
+		g_curLBA = CdPosToInt((CdlLOC *)param);
+		return 1;
+	case CdlSetmode:
+	case CdlNop:
+	case CdlPause:
+	case CdlMute:
+	case CdlDemute:
+		return 1;
+	default:
+		PSYQ_STUB_ONCE();
+		return 1;
+	}
+}
+
+extern "C" int CdControlF(u_char com, u_char *param)
+{
+	return CdControlB(com, param, 0);
+}
+
+extern "C" int CdRead(int sectors, u_long *buf, int mode)
+{
+	(void)mode;
+	unsigned char *dst = (unsigned char *)buf;
+
+	while (sectors > 0)
+	{
+		VirtFile *vf = fileForLBA(g_curLBA);
+		if (!vf || !vf->fp)
+		{
+			fprintf(stderr, "[shim] CdRead: LBA %ld outside the virtual disc\n", g_curLBA);
+			memset(dst, 0, (size_t)sectors * SECTOR);
+			return 1;
+		}
+
+		long offset = (g_curLBA - vf->startLBA) * SECTOR;
+		fseek(vf->fp, offset, SEEK_SET);
+		size_t got = fread(dst, 1, SECTOR, vf->fp);
+		if (got < (size_t)SECTOR)
+			memset(dst + got, 0, SECTOR - got);	/* zero-fill the EOF tail sector */
+
+		dst += SECTOR;
+		g_curLBA++;
+		sectors--;
+	}
+	return 1;
+}
+
+extern "C" int CdReadSync(int mode, u_char *result)
+{
+	(void)mode;
+	(void)result;
+	Port_Pump();		/* PS1 interrupt-time work happens during reads */
+	return 0;			/* complete */
+}
+
+extern "C" int CdSync(int mode, u_char *result)
+{
+	(void)mode;
+	(void)result;
+	return CdlComplete;
+}
+
+extern "C" int CdGetSector(void *madr, int size)
+{
+	(void)madr;
+	(void)size;
+	PSYQ_STUB_ONCE();
+	return 1;
+}
+
+extern "C" int CdMix(CdlATV *vol)
+{
+	(void)vol;
+	PSYQ_STUB_ONCE();
+	return 1;
+}
+
+extern "C" int CdSetDebug(int level)
+{
+	(void)level;
+	return 0;
+}
+
+extern "C" CdlCB CdReadCallback(CdlCB func)
+{
+	(void)func;
+	PSYQ_STUB_ONCE();
+	return NULL;
+}
+
+extern "C" CdlCB CdReadyCallback(CdlCB func)
+{
+	(void)func;
+	PSYQ_STUB_ONCE();
+	return NULL;
+}
