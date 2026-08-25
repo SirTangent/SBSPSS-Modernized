@@ -1,0 +1,73 @@
+/*	Software PS1 GPU - shared internal state (M2).
+
+	VRAM is the real thing: 1024x512 halfwords, 15-bit MBBBBBGGGGGRRRRR
+	(R in the low bits, bit 15 = STP/mask), verified against the game's own
+	SaveScreen unpack.  The draw-state mirrors the hardware registers the
+	GP0 E1-E6 commands program; PutDrawEnv/PutDispEnv are just batched
+	writes to it.  Everything is single-threaded under the cooperative pump.
+*/
+#ifndef PORT_GPU_CORE_H
+#define PORT_GPU_CORE_H
+
+#include <stdint.h>
+
+#define VRAM_W 1024
+#define VRAM_H 512
+
+extern uint16_t g_vram[VRAM_H][VRAM_W];
+
+struct GpuState
+{
+	/* drawing area (inclusive), from E3/E4 */
+	int		clipX0, clipY0, clipX1, clipY1;
+	/* drawing offset, from E5 (11-bit signed) */
+	int		ofsX, ofsY;
+	/* E1 draw mode: texture page base, semi-trans mode, texture depth, dither */
+	int		texBaseX;		/* halfwords */
+	int		texBaseY;
+	int		semiMode;		/* 0..3 (ABR) */
+	int		texDepth;		/* 0=4bpp 1=8bpp 2=15bpp */
+	int		dither;
+	/* E2 texture window (unused by the game; stored for completeness) */
+	uint32_t	texWindow;
+
+	/* display */
+	int		dispX, dispY, dispW, dispH;	/* DISPENV.disp - VRAM region scanned out */
+	int		screenX, screenY;			/* DISPENV.screen - CRT placement (PAL y offset) */
+	int		dispMask;					/* SetDispMask: 1 = video enabled */
+};
+
+extern GpuState g_gpu;
+
+/* gp0.cpp: execute `count` GP0 words at `words` against g_gpu/g_vram */
+void GPU_ExecWords(const uint32_t *words, int count);
+
+/*	gp0.cpp: decode an E1 draw-mode bit pattern into g_gpu (texture page base,
+	semi-transparency mode, depth, dither).  Shared with PutDrawEnv, which
+	assembles the same layout from DRAWENV.tpage/dtd.  */
+void GPU_ApplyTexpage(uint32_t tp);
+
+/* raster.cpp entry points (coords already offset-applied, clip in g_gpu) */
+struct RasterVtx { int x, y; int u, v; uint8_t r, g, b; };
+struct RasterCfg
+{
+	int		textured;
+	int		rawTex;			/* code bit0: no modulation */
+	int		semi;			/* code bit1 */
+	int		gouraud;
+	/* texture state captured at prim time */
+	int		texBaseX, texBaseY, texDepth, semiMode;
+	int		clutX, clutY;
+};
+void Raster_Triangle(const RasterVtx *v0, const RasterVtx *v1, const RasterVtx *v2,
+					 const RasterCfg *cfg);
+void Raster_Line(const RasterVtx *a, const RasterVtx *b, const RasterCfg *cfg);
+void Raster_FillRect15(int x, int y, int w, int h, uint16_t col15);	/* raw, no clip/mask */
+
+/* host hooks (window.cpp; safe no-ops before the window exists).
+   extern "C": pump.cpp forward-declares Host_VBlank inside an extern "C"
+   function, which gives the declaration C linkage - keep them C throughout. */
+extern "C" void Host_EnsureVideo(void);		/* create SDL window + presenter */
+extern "C" void Host_VBlank(unsigned long vblankNo);	/* events + present + tooling */
+
+#endif

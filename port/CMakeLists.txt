@@ -108,6 +108,12 @@ sbsp_game_flavour(sbsp_game_main)
 # ---------------------------------------------------------------------------
 # PsyQ-on-PC shim runtime (modern C++)
 # ---------------------------------------------------------------------------
+# SDL3 (window/input/present host).  The mingw32 package ships a real static
+# lib, so the exes stay standalone; SDL3::SDL3-static drags its Win32 deps in
+# via the package's CMake config.  Vulkan needs only headers at build time -
+# the loader is reached at runtime through SDL_Vulkan_LoadLibrary.
+find_package(SDL3 CONFIG REQUIRED)
+
 file(GLOB SBSP_SHIM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/psyq/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/psyq/*/*.cpp
@@ -126,6 +132,24 @@ target_include_directories(psyq_shim PRIVATE
     ${SBSP_ROOT}
     ${SBSP_ROOT}/source
     ${SBSP_ROOT}/out/${SBSP_TERRITORY}/include
+)
+if(TARGET SDL3::SDL3-static)
+    target_link_libraries(psyq_shim PUBLIC SDL3::SDL3-static)
+else()
+    target_link_libraries(psyq_shim PUBLIC SDL3::SDL3)
+endif()
+
+# ---------------------------------------------------------------------------
+# The game itself (M2+): the real main() from source/system/main.cpp over the
+# whole-archive game lib and the shim.  WIN32 subsystem is deliberately NOT
+# set - the console carries the shim's stub/diagnostic log.
+# ---------------------------------------------------------------------------
+add_executable(sbsp $<TARGET_OBJECTS:sbsp_game_main>)
+set_target_properties(sbsp PROPERTIES LINKER_LANGUAGE CXX)
+target_link_options(sbsp PRIVATE -static)
+target_link_libraries(sbsp PRIVATE
+    -Wl,--whole-archive sbsp_game -Wl,--no-whole-archive
+    psyq_shim
 )
 
 # ---------------------------------------------------------------------------
@@ -146,3 +170,17 @@ target_compile_features(gte_trig_test PRIVATE cxx_std_17)
 target_include_directories(gte_trig_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/psyq)
 target_link_options(gte_trig_test PRIVATE -static)
 target_link_libraries(gte_trig_test PRIVATE psyq_shim)
+
+# software-GPU unit tests: uses the vintage LIBGPU prim macros, so it compiles
+# with the shim's include arrangement (shadow headers + -idirafter psyq)
+add_executable(gpu_test tests/gpu_test.cpp)
+target_compile_features(gpu_test PRIVATE cxx_std_17)
+target_compile_options(gpu_test PRIVATE ${SBSP_PSYQ_DIRAFTER})
+target_include_directories(gpu_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/psyq
+    ${SBSP_ROOT}
+    ${SBSP_ROOT}/source
+)
+target_link_options(gpu_test PRIVATE -static)
+target_link_libraries(gpu_test PRIVATE psyq_shim)
