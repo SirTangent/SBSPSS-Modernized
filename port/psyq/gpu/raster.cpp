@@ -157,31 +157,65 @@ void Raster_Triangle(const RasterVtx *v0, const RasterVtx *v1, const RasterVtx *
 	long bias1 = (A1 > 0 || (A1 == 0 && B1 > 0)) ? 0 : -1;
 	long bias2 = (A2 > 0 || (A2 == 0 && B2 > 0)) ? 0 : -1;
 
+	/*	Interpolation.  Each attribute q is (ua*aq + ub*bq + uc*cq) / area with
+		ua+ub+uc == area, so the numerator is linear in x and y - carry it
+		incrementally instead of re-weighting three vertices per pixel, and
+		replace the divide with a reciprocal multiply.
+
+		The reciprocal is EXACT for the whole range that occurs here.  With
+		m = ceil(2^52/area), floor(n*m >> 52) == n/area for every
+		0 <= n <= area*255 provided 2^52 >= area*(area*255).  The bounding-box
+		reject above caps area (a doubled triangle area) at 2*1023*511 < 2^21,
+		so area^2*255 < 2^50.  n*m stays under 2^60, inside uint64_t.  */
+	const int	SHIFT = 52;
+	uint64_t	recip = ((uint64_t)1 << SHIFT) / (uint64_t)area;
+	if (recip * (uint64_t)area != ((uint64_t)1 << SHIFT))
+		recip++;								/* round up - see above */
+#define DIVAREA(n)	((int)(((uint64_t)(n) * recip) >> SHIFT))
+
+	/*	Per-x deltas of each numerator (the y deltas are folded into the
+		per-row restart below).  */
+	const long long duX = (long long)A0 * a->u + (long long)A1 * b->u + (long long)A2 * c->u;
+	const long long dvX = (long long)A0 * a->v + (long long)A1 * b->v + (long long)A2 * c->v;
+	const long long drX = (long long)A0 * a->r + (long long)A1 * b->r + (long long)A2 * c->r;
+	const long long dgX = (long long)A0 * a->g + (long long)A1 * b->g + (long long)A2 * c->g;
+	const long long dbX = (long long)A0 * a->b + (long long)A1 * b->b + (long long)A2 * c->b;
+
+	const int textured = cfg->textured;
+	const int gouraud  = cfg->gouraud;
+
 	for (int y = miny; y <= maxy; y++)
 	{
 		long w0 = A0 * minx + B0 * y + C0 + bias0;
 		long w1 = A1 * minx + B1 * y + C1 + bias1;
 		long w2 = A2 * minx + B2 * y + C2 + bias2;
 
-		for (int x = minx; x <= maxx; x++, w0 += A0, w1 += A1, w2 += A2)
+		/* unbiased barycentric weights at the row start */
+		long long ua = w0 - bias0, ub = w1 - bias1, uc = w2 - bias2;
+		long long nu = ua * a->u + ub * b->u + uc * c->u;
+		long long nv = ua * a->v + ub * b->v + uc * c->v;
+		long long nr = ua * a->r + ub * b->r + uc * c->r;
+		long long ng = ua * a->g + ub * b->g + uc * c->g;
+		long long nb = ua * a->b + ub * b->b + uc * c->b;
+
+		for (int x = minx; x <= maxx; x++,
+			 w0 += A0, w1 += A1, w2 += A2,
+			 nu += duX, nv += dvX, nr += drX, ng += dgX, nb += dbX)
 		{
 			if ((w0 | w1 | w2) < 0)
 				continue;
 
-			/* barycentric weights of a,b,c (undo the bias for interpolation) */
-			long ua = w0 - bias0, ub = w1 - bias1, uc = w2 - bias2;
-
 			int u = 0, v = 0, cr, cg, cb;
-			if (cfg->textured)
+			if (textured)
 			{
-				u = (int)((ua * a->u + ub * b->u + uc * c->u) / area);
-				v = (int)((ua * a->v + ub * b->v + uc * c->v) / area);
+				u = DIVAREA(nu);
+				v = DIVAREA(nv);
 			}
-			if (cfg->gouraud)
+			if (gouraud)
 			{
-				cr = (int)((ua * a->r + ub * b->r + uc * c->r) / area);
-				cg = (int)((ua * a->g + ub * b->g + uc * c->g) / area);
-				cb = (int)((ua * a->b + ub * b->b + uc * c->b) / area);
+				cr = DIVAREA(nr);
+				cg = DIVAREA(ng);
+				cb = DIVAREA(nb);
 			}
 			else
 			{
@@ -191,6 +225,7 @@ void Raster_Triangle(const RasterVtx *v0, const RasterVtx *v1, const RasterVtx *
 			shadePixel(x, y, u, v, cr, cg, cb, cfg);
 		}
 	}
+#undef DIVAREA
 }
 
 /*****************************************************************************/
@@ -251,13 +286,10 @@ void Raster_Line(const RasterVtx *pa, const RasterVtx *pb, const RasterCfg *cfg)
 			{
 				cr = pa->r;  cg = pa->g;  cb = pa->b;
 			}
-			int fr = cr >> 3, fg = cg >> 3, fb = cb >> 3;
-			uint16_t out;
-			if (cfg->semi)
-				out = blendSemi(g_vram[y0][x0], fr, fg, fb, cfg->semiMode);
-			else
-				out = (uint16_t)(fr | (fg << 5) | (fb << 10));
-			g_vram[y0][x0] = out;
+			/*	lines are never textured, so the shared pipeline's untextured
+				path (8->5 bit colour, optional semi-transparency, STP 0) is
+				exactly the line write rule - u/v are ignored  */
+			shadePixel(x0, y0, 0, 0, cr, cg, cb, cfg);
 		}
 
 		if (x0 == x1 && y0 == y1)

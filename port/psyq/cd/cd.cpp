@@ -273,12 +273,22 @@ extern "C" int CdReadSync(int mode, u_char *result)
 	(void)result;
 	Port_Pump();		/* PS1 interrupt-time work happens during reads */
 	if (mode == 0)
-	{	/* blocking wait */
+	{	/* blocking wait - PumpIdle, not Pump: a bare spin burns a whole core
+		   for the duration of every load */
 		while (Port_NowSeconds() < g_readDeadline)
-			Port_Pump();
+			Port_PumpIdle();
 		return 0;
 	}
-	return (Port_NowSeconds() < g_readDeadline) ? 1 : 0;
+
+	if (Port_NowSeconds() < g_readDeadline)
+	{
+		/*	the live caller (cdfile.cpp:45) is `while (CdReadSync(1,0) > 0);` -
+			a bare spin.  Yield a tick before reporting busy so a paced load
+			costs milliseconds of one core rather than all of it.  */
+		Port_PumpIdle();
+		return 1;
+	}
+	return 0;
 }
 
 extern "C" int CdSync(int mode, u_char *result)

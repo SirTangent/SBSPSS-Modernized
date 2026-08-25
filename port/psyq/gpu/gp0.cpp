@@ -36,7 +36,11 @@ static void vtxFromWord(RasterVtx *v, uint32_t xy)
 	v->y = signext11(xy >> 16) + g_gpu.ofsY;
 }
 
-static void applyTexpage(uint32_t tp)
+/*	The one decode of E1 draw-mode bits.  Reached three ways - a standalone
+	0xE1 word, a textured poly's tpage attribute, and PutDrawEnv (which
+	assembles the same bit layout out of DRAWENV.tpage/dtd) - so it lives
+	here rather than being spelled out at each.  */
+void GPU_ApplyTexpage(uint32_t tp)
 {
 	g_gpu.texBaseX = (tp & 0xF) << 6;
 	g_gpu.texBaseY = ((tp >> 4) & 1) << 8;
@@ -102,7 +106,7 @@ static int execPoly(const uint32_t *w, int avail)
 			}
 			else if (k == 1)
 			{
-				applyTexpage(uv >> 16);	/* poly tpage attribute programs E1 bits */
+				GPU_ApplyTexpage(uv >> 16);	/* poly tpage attribute programs E1 bits */
 			}
 		}
 	}
@@ -255,7 +259,7 @@ void GPU_ExecWords(const uint32_t *words, int count)
 			i += execRect(words + i, count - i);
 		else if (cmd == 0xE1)
 		{
-			applyTexpage(word);
+			GPU_ApplyTexpage(word);
 			i++;
 		}
 		else if (cmd == 0xE2)
@@ -306,6 +310,8 @@ void GPU_ExecWords(const uint32_t *words, int count)
 }
 
 /*****************************************************************************/
+static uintptr_t g_arenaBase, g_arenaEnd;	/* [base, end) - the reconstructable range */
+
 static void verifyArenaWindowOnce(void)
 {
 	static int checked;
@@ -321,6 +327,8 @@ static void verifyArenaWindowOnce(void)
 				(void *)base, (void *)end);
 		abort();
 	}
+	g_arenaBase = base;
+	g_arenaEnd  = end + 1;
 }
 
 extern "C" void DrawOTag(u_long *p)
@@ -341,7 +349,23 @@ extern "C" void DrawOTag(u_long *p)
 			GPU_ExecWords(tagp + 1, len);
 		if (next == 0xFFFFFF)
 			break;
-		tagp = (uint32_t *)(window | next);
+
+		uintptr_t addr = window | next;
+		/*	The reconstruction only holds while every linked prim lives in the
+			arena.  A prim allocated elsewhere (a static, a stack POLY, a
+			future non-arena pool) yields a plausible-looking wild pointer that
+			would be interpreted as GP0 words - state the invariant here so it
+			fails at the cause instead of somewhere downstream.  */
+		if (addr < g_arenaBase || addr + 4 > g_arenaEnd || (addr & 3))
+		{
+			fprintf(stderr, "[gpu] DrawOTag: tag %08lX at %p reconstructs to %p, "
+							"outside the prim arena (%p..%p) - a linked primitive "
+							"was not allocated from the game heap\n",
+					(unsigned long)tag, (void *)tagp, (void *)addr,
+					(void *)g_arenaBase, (void *)g_arenaEnd);
+			abort();
+		}
+		tagp = (uint32_t *)addr;
 		if (--guard == 0)
 		{
 			fprintf(stderr, "[gpu] DrawOTag: runaway tag chain - corrupt OT?\n");

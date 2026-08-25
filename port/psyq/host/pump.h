@@ -12,9 +12,10 @@ extern "C" {
 #endif
 
 void			Port_Pump(void);			/* advance vblank clock, fire callbacks */
+void			Port_PumpIdle(void);		/* Sleep(1) + Port_Pump - use in wait loops */
 unsigned long	Port_VBlankCount(void);
 void			Port_SetVBlankHz(int hz);	/* 60 NTSC / 50 PAL (SetVideoMode) */
-double			Port_NowSeconds(void);		/* QPC wall clock (CD pacing etc.) */
+double			Port_NowSeconds(void);		/* QPC wall clock, fixed epoch (CD pacing) */
 
 #ifdef __cplusplus
 }

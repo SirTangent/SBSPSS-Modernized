@@ -42,6 +42,11 @@ extern GpuState g_gpu;
 /* gp0.cpp: execute `count` GP0 words at `words` against g_gpu/g_vram */
 void GPU_ExecWords(const uint32_t *words, int count);
 
+/*	gp0.cpp: decode an E1 draw-mode bit pattern into g_gpu (texture page base,
+	semi-transparency mode, depth, dither).  Shared with PutDrawEnv, which
+	assembles the same layout from DRAWENV.tpage/dtd.  */
+void GPU_ApplyTexpage(uint32_t tp);
+
 /* raster.cpp entry points (coords already offset-applied, clip in g_gpu) */
 struct RasterVtx { int x, y; int u, v; uint8_t r, g, b; };
 struct RasterCfg

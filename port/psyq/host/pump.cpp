@@ -22,7 +22,8 @@ static unsigned long	g_lastVSyncVblank;
 static unsigned long	g_vblankBase;		/* wall count at the last rate change */
 static int				g_hz = 60;
 static LARGE_INTEGER	g_qpcFreq;
-static LARGE_INTEGER	g_qpcBase;
+static LARGE_INTEGER	g_qpcBase;		/* vblank epoch - REBASED by Port_SetVBlankHz */
+static LARGE_INTEGER	g_qpcOrigin;	/* wall-clock epoch - fixed for the whole run */
 static int				g_clockInit;
 
 static void clockInit(void)
@@ -31,6 +32,7 @@ static void clockInit(void)
 	{
 		QueryPerformanceFrequency(&g_qpcFreq);
 		QueryPerformanceCounter(&g_qpcBase);
+		g_qpcOrigin = g_qpcBase;
 		g_clockInit = 1;
 	}
 }
@@ -59,12 +61,16 @@ extern "C" unsigned long Port_VBlankCount(void)
 	return g_vblank;
 }
 
+/*	Wall clock for deadline arithmetic (CD pacing).  It must run off the
+	FIXED origin, never off g_qpcBase: Port_SetVBlankHz rebases that epoch at
+	the game's SetVideoMode, which would step this clock backwards by however
+	long the boot took and freeze every read deadline set before it.  */
 extern "C" double Port_NowSeconds(void)
 {
 	LARGE_INTEGER now;
 	clockInit();
 	QueryPerformanceCounter(&now);
-	return (double)(now.QuadPart - g_qpcBase.QuadPart) / (double)g_qpcFreq.QuadPart;
+	return (double)(now.QuadPart - g_qpcOrigin.QuadPart) / (double)g_qpcFreq.QuadPart;
 }
 
 extern "C" void Port_Pump(void)
@@ -89,6 +95,15 @@ extern "C" void Port_Pump(void)
 	}
 }
 
+/*	Wait-loop body: yield the core for a tick, then pump.  Every blocking SDK
+	call spins on some deadline (a vblank number, a CD read completion); doing
+	that without the Sleep pins a core at 100% for the whole wait.  */
+extern "C" void Port_PumpIdle(void)
+{
+	Sleep(1);
+	Port_Pump();
+}
+
 extern "C" int VSync(int mode)
 {
 	Port_Pump();
@@ -98,10 +113,7 @@ extern "C" int VSync(int mode)
 	unsigned long until = (mode == 0) ? g_vblank + 1
 									  : g_lastVSyncVblank + (unsigned long)mode;
 	while (g_vblank < until)
-	{
-		Sleep(1);
-		Port_Pump();
-	}
+		Port_PumpIdle();
 	g_lastVSyncVblank = g_vblank;
 	return (int)g_vblank;
 }

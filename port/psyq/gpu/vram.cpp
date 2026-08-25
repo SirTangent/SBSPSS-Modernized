@@ -113,12 +113,10 @@ extern "C" DISPENV *PutDispEnv(DISPENV *env)
 
 extern "C" DRAWENV *PutDrawEnv(DRAWENV *env)
 {
-	/* E1 from tpage/dtd (dfe deliberately ignored - see header comment) */
-	g_gpu.texBaseX = (env->tpage & 0xF) << 6;
-	g_gpu.texBaseY = ((env->tpage >> 4) & 1) << 8;
-	g_gpu.semiMode = (env->tpage >> 5) & 3;
-	g_gpu.texDepth = (env->tpage >> 7) & 3;
-	g_gpu.dither   = env->dtd;
+	/*	E1: the hardware word is tpage with dtd in bit 9 (and dfe in bit 10,
+		deliberately ignored - see the header comment).  Assemble it and run
+		the same decode the 0xE1 command uses, so the two cannot drift.  */
+	GPU_ApplyTexpage((uint32_t)env->tpage | ((uint32_t)(env->dtd & 1) << 9));
 	/* E2 */
 	g_gpu.texWindow = 0;
 	/* E3/E4 */

@@ -175,6 +175,53 @@ int main()
 		checkPx(220, 100, 0x1234, "FT4: texel 0000 leaves dest untouched");
 	}
 
+	/*	--- POLY_G3 gouraud interpolation ------------------------------------
+		Pins the barycentric path (which interpolates through a precomputed
+		reciprocal rather than a per-pixel divide).  Right-angled triangle
+		a=(100,100) red, b=(164,100) green, c=(100,164) blue: the vertex pixel
+		must be the vertex colour exactly, and each edge midpoint the exact
+		mean of its two endpoints.  */
+	{
+		resetEnv();
+
+		uint32_t g3[7];
+		g3[0] = 0x06000000;						/* tag: len 6 */
+		g3[1] = 0x30000000u | 0x0000FF;			/* G3 + colour0 = red   (BGR word) */
+		g3[2] = (100 << 16) | 100;
+		g3[3] = 0x00FF00;						/* colour1 = green */
+		g3[4] = (100 << 16) | 164;
+		g3[5] = 0xFF0000;						/* colour2 = blue  */
+		g3[6] = (164 << 16) | 100;
+		DrawPrim(g3);
+
+		checkPx(100, 100, 0x001F, "G3: vertex 0 pixel is vertex 0 colour exactly");
+		checkPx(132, 100, (uint16_t)(15 | (15 << 5)),
+				"G3: a-b midpoint is (red+green)/2");
+		checkPx(100, 132, (uint16_t)(15 | (15 << 10)),
+				"G3: a-c midpoint is (red+blue)/2");
+		checkPx(163, 163, 0x0000, "G3: outside the hypotenuse stays clear");
+	}
+
+	/*	--- gouraud at the maximum triangle size ------------------------------
+		The interpolation reciprocal is only exact while area*(area*255) fits
+		its shift; the biggest triangle the size-reject allows is the worst
+		case, so pin an exact vertex colour there too.  */
+	{
+		resetEnv();
+
+		uint32_t g3[7];
+		g3[0] = 0x06000000;
+		g3[1] = 0x30000000u | 0x0000FF;			/* red   at (0,0)     */
+		g3[2] = 0;
+		g3[3] = 0x00FF00;						/* green at (0,511)   */
+		g3[4] = (511 << 16) | 0;
+		g3[5] = 0xFF0000;						/* blue  at (1023,0)  */
+		g3[6] = 1023;
+		DrawPrim(g3);
+
+		checkPx(0, 0, 0x001F, "G3 (1023x511): vertex colour still exact");
+	}
+
 	/* --- semi-transparency mode 0 (B/2 + F/2) via TPOLY-style E1+poly ----- */
 	{
 		resetEnv();

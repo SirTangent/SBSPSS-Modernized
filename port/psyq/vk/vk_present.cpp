@@ -92,7 +92,11 @@
 	F(vkAllocateDescriptorSets)												\
 	F(vkUpdateDescriptorSets)												\
 	F(vkCreateSampler)														\
-	F(vkCreateSemaphore)
+	F(vkCreateSemaphore)													\
+	F(vkDestroySemaphore)													\
+	F(vkCreateFence)														\
+	F(vkWaitForFences)														\
+	F(vkResetFences)
 
 #define DECL(name) static PFN_##name p_##name;
 VK_FNS(DECL)
@@ -109,13 +113,23 @@ static VkQueue			s_queue;
 static uint32_t			s_queueFamily;
 static VkPhysicalDeviceMemoryProperties s_memProps;
 
+/*	Swapchain image counts are the driver's call, not ours: a mailbox-happy or
+	HDR-composited driver can hand back far more than the minImageCount+1 we
+	ask for, and vkAcquireNextImageKHR then returns indices past the end of a
+	fixed array.  Query the real count and refuse loudly if it exceeds this.  */
+#define MAX_SWAP_IMAGES		16
+/*	Frames the CPU may run ahead of the GPU.  Each needs its own command
+	buffer, staging buffer and acquire semaphore.  */
+#define FRAMES_IN_FLIGHT	2
+
 static VkSwapchainKHR	s_swapchain;
 static VkFormat			s_swapFormat;
 static VkExtent2D		s_swapExtent;
 static uint32_t			s_swapCount;
-static VkImage			s_swapImages[8];
-static VkImageView		s_swapViews[8];
-static VkFramebuffer	s_swapFbs[8];
+static uint32_t			s_swapValid;	/* views/fbs actually built; 0 = unusable */
+static VkImage			s_swapImages[MAX_SWAP_IMAGES];
+static VkImageView		s_swapViews[MAX_SWAP_IMAGES];
+static VkFramebuffer	s_swapFbs[MAX_SWAP_IMAGES];
 
 static VkRenderPass		s_renderPass;
 static VkPipelineLayout	s_pipeLayout;
@@ -126,13 +140,15 @@ static VkSampler		s_sampler;
 
 static VkImage			s_vramImage;
 static VkImageView		s_vramView;
-static VkBuffer			s_staging;
-static void				*s_stagingMap;
+static VkBuffer			s_staging[FRAMES_IN_FLIGHT];
+static void				*s_stagingMap[FRAMES_IN_FLIGHT];
 
 static VkCommandPool	s_cmdPool;
-static VkCommandBuffer	s_cmd;
-static VkSemaphore		s_semAcquire;
-static VkSemaphore		s_semRender;
+static VkCommandBuffer	s_cmd[FRAMES_IN_FLIGHT];
+static VkSemaphore		s_semAcquire[FRAMES_IN_FLIGHT];
+static VkFence			s_fence[FRAMES_IN_FLIGHT];
+static VkSemaphore		s_semRender[MAX_SWAP_IMAGES];	/* per image: present waits on it */
+static uint32_t			s_frame;						/* frame slot cursor */
 
 static int				s_vramInShaderLayout;	/* image layout tracking */
 
@@ -142,6 +158,20 @@ struct PushConsts { int32_t disp[4]; int32_t mask; };
 	do {																	\
 		VkResult _r = (expr);												\
 		if (_r != VK_SUCCESS)												\
+		{																	\
+			fprintf(stderr, "[vk] %s failed (%d)\n", #expr, (int)_r);		\
+			return false;													\
+		}																	\
+	} while (0)
+
+/*	Enumeration calls that write into a fixed-size array report VK_INCOMPLETE
+	when the array was too small.  That is a successful call returning a
+	truncated list - never a failure - so it must not travel the CHECK path
+	(which at the swapchain sites would abandon recreation half-done).  */
+#define CHECK_ENUM(expr)													\
+	do {																	\
+		VkResult _r = (expr);												\
+		if (_r != VK_SUCCESS && _r != VK_INCOMPLETE)						\
 		{																	\
 			fprintf(stderr, "[vk] %s failed (%d)\n", #expr, (int)_r);		\
 			return false;													\
@@ -164,7 +194,13 @@ static bool pickSurfaceFormat(void)
 {
 	VkSurfaceFormatKHR fmts[32];
 	uint32_t nf = 32;
-	CHECK(p_vkGetPhysicalDeviceSurfaceFormatsKHR(s_phys, s_surface, &nf, fmts));
+	CHECK_ENUM(p_vkGetPhysicalDeviceSurfaceFormatsKHR(s_phys, s_surface, &nf, fmts));
+	if (nf == 0)
+	{
+		fprintf(stderr, "[vk] surface reports no formats\n");
+		return false;
+	}
+	/* VK_INCOMPLETE just means the driver had more; nf counts what it wrote */
 	VkSurfaceFormatKHR pick = fmts[0];
 	for (uint32_t i = 0; i < nf; i++)
 		if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM)
@@ -174,7 +210,39 @@ static bool pickSurfaceFormat(void)
 	return true;
 }
 
-static bool createSwapchain(void)
+static void destroySwapResources(void)
+{
+	for (uint32_t i = 0; i < s_swapValid; i++)
+	{
+		p_vkDestroyFramebuffer(s_dev, s_swapFbs[i], NULL);
+		p_vkDestroyImageView(s_dev, s_swapViews[i], NULL);
+	}
+	s_swapValid = 0;
+}
+
+/*	A present whose swapchain went out of date may never consume the render
+	semaphore it was told to wait on, leaving it signalled with no matching
+	wait.  Reusing such a semaphore is undefined, so retire the whole set
+	whenever the swapchain is rebuilt.  (No-op on the very first build - they
+	do not exist yet.)  */
+static bool refreshRenderSemaphores(void)
+{
+	if (!s_semRender[0])
+		return true;
+
+	VkSemaphoreCreateInfo sci;
+	memset(&sci, 0, sizeof(sci));
+	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	for (int i = 0; i < MAX_SWAP_IMAGES; i++)
+	{
+		p_vkDestroySemaphore(s_dev, s_semRender[i], NULL);
+		s_semRender[i] = VK_NULL_HANDLE;
+		CHECK(p_vkCreateSemaphore(s_dev, &sci, NULL, &s_semRender[i]));
+	}
+	return true;
+}
+
+static bool buildSwapchain(void)
 {
 	VkSurfaceCapabilitiesKHR caps;
 	CHECK(p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(s_phys, s_surface, &caps));
@@ -217,17 +285,26 @@ static bool createSwapchain(void)
 	if (s_swapchain)
 	{
 		p_vkDeviceWaitIdle(s_dev);
-		for (uint32_t i = 0; i < s_swapCount; i++)
-		{
-			p_vkDestroyFramebuffer(s_dev, s_swapFbs[i], NULL);
-			p_vkDestroyImageView(s_dev, s_swapViews[i], NULL);
-		}
+		destroySwapResources();
 		p_vkDestroySwapchainKHR(s_dev, s_swapchain, NULL);
 	}
-	s_swapchain  = newChain;
+	s_swapchain  = newChain;	/* owned from here on, even if the rest fails */
 	s_swapExtent = extent;
+	if (!refreshRenderSemaphores())
+		return false;
 
-	s_swapCount = 8;
+	/*	Count first, then fetch: asking for at most MAX and taking VK_INCOMPLETE
+		as "good enough" would leave images we never build framebuffers for,
+		while acquire could still hand back their indices.  */
+	uint32_t nImages = 0;
+	CHECK(p_vkGetSwapchainImagesKHR(s_dev, s_swapchain, &nImages, NULL));
+	if (nImages == 0 || nImages > MAX_SWAP_IMAGES)
+	{
+		fprintf(stderr, "[vk] driver created %u swapchain images (limit %d)\n",
+				nImages, MAX_SWAP_IMAGES);
+		return false;
+	}
+	s_swapCount = nImages;
 	CHECK(p_vkGetSwapchainImagesKHR(s_dev, s_swapchain, &s_swapCount, s_swapImages));
 
 	for (uint32_t i = 0; i < s_swapCount; i++)
@@ -253,8 +330,24 @@ static bool createSwapchain(void)
 		fbci.height          = extent.height;
 		fbci.layers          = 1;
 		CHECK(p_vkCreateFramebuffer(s_dev, &fbci, NULL, &s_swapFbs[i]));
+
+		s_swapValid = i + 1;	/* only these are safe to use - and to destroy */
 	}
 	return true;
+}
+
+/*	Wrapper enforcing the invariant the frame loop relies on: either the
+	swapchain and its framebuffers are entirely valid (s_swapValid == count),
+	or s_swapValid is 0 and nothing stale is left to be drawn into.  A failure
+	partway through recreation is transient (a resize mid-flight, a driver
+	still settling) - the next frame retries.  */
+static bool createSwapchain(void)
+{
+	if (buildSwapchain() && s_swapValid == s_swapCount)
+		return true;
+	p_vkDeviceWaitIdle(s_dev);	/* nothing may still be rendering into them */
+	destroySwapResources();
+	return false;
 }
 
 /*****************************************************************************/
@@ -312,7 +405,7 @@ bool VkPresent_Init(SDL_Window *window)
 	/* physical device + queue family (graphics + present) */
 	VkPhysicalDevice devs[16];
 	uint32_t nd = 16;
-	CHECK(p_vkEnumeratePhysicalDevices(s_instance, &nd, devs));
+	CHECK_ENUM(p_vkEnumeratePhysicalDevices(s_instance, &nd, devs));
 	if (nd == 0)
 	{
 		fprintf(stderr, "[vk] no Vulkan devices\n");
@@ -415,21 +508,26 @@ bool VkPresent_Init(SDL_Window *window)
 		vci.subresourceRange.layerCount = 1;
 		CHECK(p_vkCreateImageView(s_dev, &vci, NULL, &s_vramView));
 
-		VkBufferCreateInfo bci;
-		memset(&bci, 0, sizeof(bci));
-		bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bci.size  = VRAM_W * VRAM_H * 2;
-		bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-		CHECK(p_vkCreateBuffer(s_dev, &bci, NULL, &s_staging));
+		/*	One staging buffer per in-flight frame: the CPU fills slot N's
+			while the GPU may still be reading slot N-1's.  */
+		for (int f = 0; f < FRAMES_IN_FLIGHT; f++)
+		{
+			VkBufferCreateInfo bci;
+			memset(&bci, 0, sizeof(bci));
+			bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+			bci.size  = VRAM_W * VRAM_H * 2;
+			bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+			CHECK(p_vkCreateBuffer(s_dev, &bci, NULL, &s_staging[f]));
 
-		p_vkGetBufferMemoryRequirements(s_dev, s_staging, &mr);
-		mai.allocationSize  = mr.size;
-		mai.memoryTypeIndex = findMemType(mr.memoryTypeBits,
-							VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		VkDeviceMemory smem;
-		CHECK(p_vkAllocateMemory(s_dev, &mai, NULL, &smem));
-		CHECK(p_vkBindBufferMemory(s_dev, s_staging, smem, 0));
-		CHECK(p_vkMapMemory(s_dev, smem, 0, VK_WHOLE_SIZE, 0, &s_stagingMap));
+			p_vkGetBufferMemoryRequirements(s_dev, s_staging[f], &mr);
+			mai.allocationSize  = mr.size;
+			mai.memoryTypeIndex = findMemType(mr.memoryTypeBits,
+								VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+			VkDeviceMemory smem;
+			CHECK(p_vkAllocateMemory(s_dev, &mai, NULL, &smem));
+			CHECK(p_vkBindBufferMemory(s_dev, s_staging[f], smem, 0));
+			CHECK(p_vkMapMemory(s_dev, smem, 0, VK_WHOLE_SIZE, 0, &s_stagingMap[f]));
+		}
 	}
 
 	/* surface format first - the render pass must match the swapchain */
@@ -649,14 +747,28 @@ bool VkPresent_Init(SDL_Window *window)
 		cbai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		cbai.commandPool        = s_cmdPool;
 		cbai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		cbai.commandBufferCount = 1;
-		CHECK(p_vkAllocateCommandBuffers(s_dev, &cbai, &s_cmd));
+		cbai.commandBufferCount = FRAMES_IN_FLIGHT;
+		CHECK(p_vkAllocateCommandBuffers(s_dev, &cbai, s_cmd));
 
 		VkSemaphoreCreateInfo sci2;
 		memset(&sci2, 0, sizeof(sci2));
 		sci2.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-		CHECK(p_vkCreateSemaphore(s_dev, &sci2, NULL, &s_semAcquire));
-		CHECK(p_vkCreateSemaphore(s_dev, &sci2, NULL, &s_semRender));
+
+		VkFenceCreateInfo fci;
+		memset(&fci, 0, sizeof(fci));
+		fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;	/* frame 0 must not block */
+
+		for (int f = 0; f < FRAMES_IN_FLIGHT; f++)
+		{
+			CHECK(p_vkCreateSemaphore(s_dev, &sci2, NULL, &s_semAcquire[f]));
+			CHECK(p_vkCreateFence(s_dev, &fci, NULL, &s_fence[f]));
+		}
+		/*	Render-finished semaphores are per swapchain IMAGE, not per frame:
+			present waits on one, and it stays pending until that image comes
+			back round through acquire.  */
+		for (int i = 0; i < MAX_SWAP_IMAGES; i++)
+			CHECK(p_vkCreateSemaphore(s_dev, &sci2, NULL, &s_semRender[i]));
 	}
 
 	return true;
@@ -668,37 +780,58 @@ void VkPresent_Frame(void)
 	if (!s_dev)
 		return;
 
-	/* handle resize: recreate when the drawable no longer matches */
+	/*	handle resize (and any earlier failed recreation) before touching the
+		swapchain: s_swapValid == 0 means the framebuffers are gone  */
 	int pw = 0, ph = 0;
 	SDL_GetWindowSizeInPixels(s_window, &pw, &ph);
 	if (pw == 0 || ph == 0)
 		return;		/* minimized */
-	if ((uint32_t)pw != s_swapExtent.width || (uint32_t)ph != s_swapExtent.height)
+	if (s_swapValid == 0 ||
+		(uint32_t)pw != s_swapExtent.width || (uint32_t)ph != s_swapExtent.height)
 	{
 		if (!createSwapchain())
 			return;
 	}
 
+	/*	Wait for this slot's previous frame before reusing its command and
+		staging buffers.  The fence is reset only once we are certain we will
+		submit - an abandoned frame must leave it signalled, or the next lap
+		round the ring waits forever.  */
+	uint32_t slot = s_frame % FRAMES_IN_FLIGHT;
+	if (p_vkWaitForFences(s_dev, 1, &s_fence[slot], VK_TRUE, ~0ull) != VK_SUCCESS)
+		return;
+
 	uint32_t imgIdx = 0;
 	VkResult r = p_vkAcquireNextImageKHR(s_dev, s_swapchain, 100000000ull,
-										 s_semAcquire, VK_NULL_HANDLE, &imgIdx);
-	if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+										 s_semAcquire[slot], VK_NULL_HANDLE, &imgIdx);
+	int recreateAfter = 0;
+	if (r == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		createSwapchain();
 		return;
 	}
-	if (r != VK_SUCCESS)
+	if (r == VK_SUBOPTIMAL_KHR)
+	{
+		/*	SUBOPTIMAL is a SUCCESSFUL acquire: the image is ours and the
+			semaphore has a signal pending.  Returning here would abandon that
+			signal and the next frame would wait on an already-pending
+			semaphore - a valid-usage violation.  Draw this frame, then
+			rebuild.  */
+		recreateAfter = 1;
+	}
+	else if (r != VK_SUCCESS)
 		return;
 
-	/* fresh VRAM into staging */
-	memcpy(s_stagingMap, g_vram, sizeof(g_vram));
+	/* fresh VRAM into this slot's staging buffer */
+	memcpy(s_stagingMap[slot], g_vram, sizeof(g_vram));
 
+	VkCommandBuffer cmd = s_cmd[slot];
 	VkCommandBufferBeginInfo bi;
 	memset(&bi, 0, sizeof(bi));
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	p_vkResetCommandBuffer(s_cmd, 0);
-	p_vkBeginCommandBuffer(s_cmd, &bi);
+	p_vkResetCommandBuffer(cmd, 0);
+	p_vkBeginCommandBuffer(cmd, &bi);
 
 	/* VRAM image: (whatever) -> TRANSFER_DST, copy, -> SHADER_READ */
 	VkImageMemoryBarrier bar;
@@ -715,7 +848,11 @@ void VkPresent_Frame(void)
 	bar.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	bar.subresourceRange.levelCount = 1;
 	bar.subresourceRange.layerCount = 1;
-	p_vkCmdPipelineBarrier(s_cmd,
+	/*	src stage FRAGMENT_SHADER also orders this against the PREVIOUS frame's
+		sampling of the same image: for one queue, a barrier's first scope
+		covers everything submitted earlier.  That is what makes a single
+		shared VRAM image safe with frames in flight.  */
+	p_vkCmdPipelineBarrier(cmd,
 		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, NULL, 0, NULL, 1, &bar);
 
@@ -726,14 +863,14 @@ void VkPresent_Frame(void)
 	cpy.imageExtent.width  = VRAM_W;
 	cpy.imageExtent.height = VRAM_H;
 	cpy.imageExtent.depth  = 1;
-	p_vkCmdCopyBufferToImage(s_cmd, s_staging, s_vramImage,
+	p_vkCmdCopyBufferToImage(cmd, s_staging[slot], s_vramImage,
 							 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cpy);
 
 	bar.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	bar.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 	bar.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	bar.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	p_vkCmdPipelineBarrier(s_cmd,
+	p_vkCmdPipelineBarrier(cmd,
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 		0, 0, NULL, 0, NULL, 1, &bar);
 	s_vramInShaderLayout = 1;
@@ -749,10 +886,10 @@ void VkPresent_Frame(void)
 	rbi.renderArea.extent = s_swapExtent;
 	rbi.clearValueCount   = 1;
 	rbi.pClearValues      = &clear;
-	p_vkCmdBeginRenderPass(s_cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+	p_vkCmdBeginRenderPass(cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
 
-	p_vkCmdBindPipeline(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline);
-	p_vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+	p_vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipeline);
+	p_vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
 							  s_pipeLayout, 0, 1, &s_dset, 0, NULL);
 
 	/*	letterbox to 4:3 - the PS1's high-res 512-wide mode still scans out
@@ -772,13 +909,13 @@ void VkPresent_Frame(void)
 		vpp.height   = outH;
 		vpp.minDepth = 0.0f;
 		vpp.maxDepth = 1.0f;
-		p_vkCmdSetViewport(s_cmd, 0, 1, &vpp);
+		p_vkCmdSetViewport(cmd, 0, 1, &vpp);
 
 		VkRect2D sc;
 		sc.offset.x      = 0;
 		sc.offset.y      = 0;
 		sc.extent        = s_swapExtent;
-		p_vkCmdSetScissor(s_cmd, 0, 1, &sc);
+		p_vkCmdSetScissor(cmd, 0, 1, &sc);
 	}
 
 	PushConsts pc;
@@ -787,39 +924,52 @@ void VkPresent_Frame(void)
 	pc.disp[2] = g_gpu.dispW ? g_gpu.dispW : 512;
 	pc.disp[3] = g_gpu.dispH ? g_gpu.dispH : 256;
 	pc.mask    = g_gpu.dispMask;
-	p_vkCmdPushConstants(s_cmd, s_pipeLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+	p_vkCmdPushConstants(cmd, s_pipeLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
 						 0, sizeof(pc), &pc);
 
-	p_vkCmdDraw(s_cmd, 3, 1, 0, 0);
-	p_vkCmdEndRenderPass(s_cmd);
-	p_vkEndCommandBuffer(s_cmd);
+	p_vkCmdDraw(cmd, 3, 1, 0, 0);
+	p_vkCmdEndRenderPass(cmd);
+	p_vkEndCommandBuffer(cmd);
 
 	VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSubmitInfo si;
 	memset(&si, 0, sizeof(si));
 	si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	si.waitSemaphoreCount   = 1;
-	si.pWaitSemaphores      = &s_semAcquire;
+	si.pWaitSemaphores      = &s_semAcquire[slot];
 	si.pWaitDstStageMask    = &waitStage;
 	si.commandBufferCount   = 1;
-	si.pCommandBuffers      = &s_cmd;
+	si.pCommandBuffers      = &cmd;
 	si.signalSemaphoreCount = 1;
-	si.pSignalSemaphores    = &s_semRender;
-	p_vkQueueSubmit(s_queue, 1, &si, VK_NULL_HANDLE);
+	si.pSignalSemaphores    = &s_semRender[imgIdx];
+
+	p_vkResetFences(s_dev, 1, &s_fence[slot]);
+	if (p_vkQueueSubmit(s_queue, 1, &si, s_fence[slot]) != VK_SUCCESS)
+	{
+		/*	nothing was queued against the fence - drain and re-signal it by
+			hand so the ring stays consistent  */
+		p_vkQueueWaitIdle(s_queue);
+		p_vkDeviceWaitIdle(s_dev);
+		p_vkResetFences(s_dev, 1, &s_fence[slot]);
+		p_vkQueueSubmit(s_queue, 0, NULL, s_fence[slot]);
+		return;
+	}
+	s_frame++;
 
 	VkPresentInfoKHR pi;
 	memset(&pi, 0, sizeof(pi));
 	pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	pi.waitSemaphoreCount = 1;
-	pi.pWaitSemaphores    = &s_semRender;
+	pi.pWaitSemaphores    = &s_semRender[imgIdx];
 	pi.swapchainCount     = 1;
 	pi.pSwapchains        = &s_swapchain;
 	pi.pImageIndices      = &imgIdx;
 	r = p_vkQueuePresentKHR(s_queue, &pi);
 	if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
-		createSwapchain();
+		recreateAfter = 1;
 
-	/*	simple sync model: fully drain the queue each frame (a 60fps 1MB
-		blit; simplicity beats overlap here)  */
-	p_vkQueueWaitIdle(s_queue);
+	/*	Recreation waits until here: createSwapchain drains the device, so the
+		frame we just submitted completes first and nothing is abandoned.  */
+	if (recreateAfter)
+		createSwapchain();
 }

@@ -25,6 +25,12 @@ static long long g_rcnt2Accum;		/* counts carried between vblanks */
 
 static const long long RCNT2_HZ = 4233600;	/* sysclock/8 */
 
+/*	Event/counter descriptors are class|index (KERNEL.H): DescRC 0xF2000000 for
+	root counters, DescHW 0xF0000000 for hardware sources.  Match the WHOLE
+	descriptor - on the low byte alone, RCntCNT2 (0xF2000002), HwGPU
+	(0xF0000002) and SwMATH (0xF4000002) are indistinguishable.  */
+static const unsigned long RCntCNT2_DESC = 0xF2000002ul;	/* DescRC|0x02 */
+
 extern "C" void Port_RCnt2Vblank(int vblankHz)
 {
 	if (!g_rcnt2Running || !g_rcnt2Func || g_rcnt2Target == 0)
@@ -49,7 +55,7 @@ void ExitCriticalSection(void)		{ }
 long OpenEvent(unsigned long desc, long spec, long mode, long (*func)())
 {
 	(void)spec; (void)mode;
-	if ((desc & 0xFF) == 0x02)		/* RCntCNT2 = DescRC|0x02 */
+	if (desc == RCntCNT2_DESC)
 	{
 		g_rcnt2Func = func;
 		return 2;
@@ -64,14 +70,14 @@ long DisableEvent(long ev)			{ (void)ev; return 1; }
 long SetRCnt(unsigned long spec, unsigned short target, long mode)
 {
 	(void)mode;
-	if ((spec & 0xFF) == 0x02)
+	if (spec == RCntCNT2_DESC)
 		g_rcnt2Target = target;
 	else
 		PSYQ_STUB_ONCE();
 	return 1;
 }
-long StartRCnt(unsigned long spec)	{ if ((spec & 0xFF) == 0x02) g_rcnt2Running = 1; return 1; }
-long StopRCnt(unsigned long spec)	{ if ((spec & 0xFF) == 0x02) g_rcnt2Running = 0; return 1; }
+long StartRCnt(unsigned long spec)	{ if (spec == RCntCNT2_DESC) g_rcnt2Running = 1; return 1; }
+long StopRCnt(unsigned long spec)	{ if (spec == RCntCNT2_DESC) g_rcnt2Running = 0; return 1; }
 long GetRCnt(unsigned long spec)	{ (void)spec; PSYQ_STUB_ONCE(); return 0; }
 
 void FlushCache(void)				{ }
