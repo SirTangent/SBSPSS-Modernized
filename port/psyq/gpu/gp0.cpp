@@ -49,20 +49,25 @@ void GPU_ApplyTexpage(uint32_t tp)
 	g_gpu.dither   = (tp >> 9) & 1;
 }
 
-static void logUnknownOnce(uint8_t cmd)
+/*****************************************************************************/
+/*	The one decode of the E2 texture-window word into the form the sampler
+	uses (coord = (coord & ~(mask*8)) | ((offset & mask) * 8)).  Called from
+	the 0xE2 handler and GPU reset - never per primitive.  */
+void GPU_ApplyTexWindow(uint32_t word)
 {
-	static uint32_t seen[8];
-	if (!(seen[cmd >> 5] & (1u << (cmd & 31))))
-	{
-		seen[cmd >> 5] |= 1u << (cmd & 31);
-		fprintf(stderr, "[gpu] unknown/unimplemented GP0 command 0x%02X - skipping packet\n", cmd);
-	}
+	int maskX = word & 0x1F, maskY = (word >> 5) & 0x1F;
+	int offX = (word >> 10) & 0x1F, offY = (word >> 15) & 0x1F;
+
+	g_gpu.texWindow = word;
+	g_gpu.twMaskU   = maskX * 8;
+	g_gpu.twOrU     = (offX & maskX) * 8;
+	g_gpu.twMaskV   = maskY * 8;
+	g_gpu.twOrV     = (offY & maskY) * 8;
 }
 
-/*****************************************************************************/
-/*	Snapshot the E1/E2 texture state a prim samples with, in the sampler's
-	precomputed texture-window form.  Callers apply any embedded tpage
-	attribute first (execPoly runs its vertex loop before this).  */
+/*	Snapshot the E1/E2 texture state a prim samples with.  Callers apply any
+	embedded tpage attribute first (execPoly runs its vertex loop before
+	this).  */
 static void snapshotTexState(RasterCfg *cfg)
 {
 	cfg->texBaseX = g_gpu.texBaseX;
@@ -70,13 +75,10 @@ static void snapshotTexState(RasterCfg *cfg)
 	cfg->texDepth = g_gpu.texDepth;
 	cfg->semiMode = g_gpu.semiMode;
 
-	uint32_t tw = g_gpu.texWindow;
-	int maskX = tw & 0x1F, maskY = (tw >> 5) & 0x1F;
-	int offX = (tw >> 10) & 0x1F, offY = (tw >> 15) & 0x1F;
-	cfg->twMaskU = maskX * 8;
-	cfg->twOrU   = (offX & maskX) * 8;
-	cfg->twMaskV = maskY * 8;
-	cfg->twOrV   = (offY & maskY) * 8;
+	cfg->twMaskU = g_gpu.twMaskU;
+	cfg->twOrU   = g_gpu.twOrU;
+	cfg->twMaskV = g_gpu.twMaskV;
+	cfg->twOrV   = g_gpu.twOrV;
 }
 
 /*****************************************************************************/
@@ -208,7 +210,15 @@ static void rasterRect(int x, int y, int w, int h, int u0, int v0,
 /*****************************************************************************/
 /*	Lines 0x40-0x5F: gouraud bit4, polyline bit3, semi bit1.  Polylines
 	draw segment chains to the 0x5xxx5xxx terminator word.  (The game
-	builds only LINE_F2; the rest is coverage for the M3 exit criterion.)  */
+	builds only LINE_F2; the rest is coverage for the M3 exit criterion.)
+
+	The terminator is recognised ONLY at the first word of a vertex group -
+	the colour word when shaded, the vertex word otherwise (vertex 1 has no
+	colour word either way: colour 1 rides in the command).  Vertex X/Y are
+	full 16-bit fields, so a legitimate vertex may well look like
+	0x5xxx5xxx; testing it there would drop a real segment and, worse,
+	hand the rest of the chain back to the command dispatcher as fresh GP0
+	words (0x55 decodes as another line), desyncing the whole stream.  */
 #define POLYLINE_TERM(word)	(((word) & 0xF000F000u) == 0x50005000u)
 
 static int execLine(const uint32_t *w, int avail)
@@ -233,10 +243,16 @@ static int execLine(const uint32_t *w, int avail)
 		b.r = a.r;  b.g = a.g;  b.b = a.b;		/* flat: command colour */
 
 		int i = 1;
-		if (i >= avail)
-			return avail;
+
+		/*	group 1 is the bare vertex 1 - terminator-checked like any
+			other group start, so an empty chain draws nothing instead of
+			swallowing the terminator as a coordinate and decoding the
+			following primitive as polyline data  */
+		if (i >= avail || POLYLINE_TERM(w[i]))
+			return (i < avail) ? i + 1 : avail;
 		vtxFromWord(&a, w[i++]);
 
+		/*	groups 2..n: [colour] vertex  */
 		while (i < avail && !POLYLINE_TERM(w[i]))
 		{
 			if (gouraud)
@@ -245,8 +261,8 @@ static int execLine(const uint32_t *w, int avail)
 				b.g = (uint8_t)((w[i] >> 8) & 0xFF);
 				b.b = (uint8_t)((w[i] >> 16) & 0xFF);
 				i++;
-				if (i >= avail || POLYLINE_TERM(w[i]))
-					break;						/* colour without a vertex */
+				if (i >= avail)
+					break;						/* truncated: colour, no vertex */
 			}
 			vtxFromWord(&b, w[i++]);
 			Raster_Line(&a, &b, &cfg);
@@ -311,7 +327,7 @@ void GPU_ExecWords(const uint32_t *words, int count)
 		}
 		else if (cmd == 0xE2)
 		{
-			g_gpu.texWindow = word;
+			GPU_ApplyTexWindow(word);
 			i++;
 		}
 		else if (cmd == 0xE3)
@@ -350,7 +366,8 @@ void GPU_ExecWords(const uint32_t *words, int count)
 		}
 		else
 		{
-			logUnknownOnce(cmd);
+			PSYQ_LOG_ONCE_KEYED(cmd, "[gpu] unknown/unimplemented GP0 "
+									 "command 0x%02X - skipping packet\n", cmd);
 			return;	/* unknown: abandon the rest of this packet */
 		}
 	}

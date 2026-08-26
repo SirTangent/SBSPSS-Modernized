@@ -28,8 +28,13 @@ struct GpuState
 	int		semiMode;		/* 0..3 (ABR) */
 	int		texDepth;		/* 0=4bpp 1=8bpp 2=15bpp */
 	int		dither;
-	/* E2 texture window - applied by the sampler via the RasterCfg snapshot */
+	/*	E2 texture window.  The raw word is kept for readback; the four
+		fields the sampler actually wants are derived once here (E2 is
+		rare, primitives are not) and copied verbatim into every
+		RasterCfg.  All-zero = identity, which is also the memset default
+		for the cfgs built by hand.  */
 	uint32_t	texWindow;
+	int			twMaskU, twOrU, twMaskV, twOrV;
 
 	/* display */
 	int		dispX, dispY, dispW, dispH;	/* DISPENV.disp - VRAM region scanned out */
@@ -46,6 +51,10 @@ void GPU_ExecWords(const uint32_t *words, int count);
 	semi-transparency mode, depth, dither).  Shared with PutDrawEnv, which
 	assembles the same layout from DRAWENV.tpage/dtd.  */
 void GPU_ApplyTexpage(uint32_t tp);
+
+/*	gp0.cpp: decode an E2 texture-window word into g_gpu (raw word plus the
+	sampler's mask/or form).  Shared with the GPU reset path.  */
+void GPU_ApplyTexWindow(uint32_t word);
 
 /* raster.cpp entry points (coords already offset-applied, clip in g_gpu) */
 struct RasterVtx { int x, y; int u, v; uint8_t r, g, b; };

@@ -326,6 +326,42 @@ int main()
 		checkPx(50, 10, 0x001F, "gouraud polyline, uniform red");
 	}
 
+	/* --- polyline terminator rules: only at a vertex GROUP's first word --- */
+	{
+		resetEnv();
+
+		/*	An empty chain (terminator where vertex 1 would be) must draw
+			nothing AND consume exactly two words, so the primitive that
+			follows is decoded as a command and not as polyline data.  */
+		static const uint32_t empty[] =
+		{
+			0xE1000000,							/* dtd 0 */
+			0x48FFFFFF,							/* flat white polyline... */
+			0x55555555,							/* ...terminated immediately */
+			0x68FFFFFF, 0x00500050,				/* 1x1 white dot at (80,80) */
+		};
+		GPU_ExecWords(empty, 5);
+		checkPx(80, 80, 0x7FFF, "stream stays in sync past an empty polyline");
+
+		/*	A vertex whose halfwords both start with nibble 5 is a legal
+			coordinate, not a terminator: for a shaded chain the terminator
+			is only read where a COLOUR word belongs.  (0x50A0_5078 =
+			x=0x5078=20600, y=0x50A0=20640 - both wrap to sane 11-bit
+			signed coords, and the segment to it must still be drawn.)  */
+		static const uint32_t shaded[] =
+		{
+			0x580000FF,							/* gouraud polyline, red */
+			0x00780028,							/* (40,120) */
+			0x000000FF, 0x00780032,				/* red, (50,120) */
+			0x000000FF, 0x50A05078,				/* red, vertex that LOOKS like 5xxx5xxx */
+			0x55555555,							/* the real terminator */
+			0x68FFFFFF, 0x00640064,				/* 1x1 white dot at (100,100) */
+		};
+		GPU_ExecWords(shaded, 9);
+		checkPx(45, 120, 0x001F, "shaded polyline segment 1");
+		checkPx(100, 100, 0x7FFF, "5xxx5xxx vertex did not fake a terminator");
+	}
+
 	if (g_failures)
 	{
 		std::printf("gpu test FAILED (%d)\n", g_failures);
