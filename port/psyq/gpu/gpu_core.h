@@ -28,7 +28,7 @@ struct GpuState
 	int		semiMode;		/* 0..3 (ABR) */
 	int		texDepth;		/* 0=4bpp 1=8bpp 2=15bpp */
 	int		dither;
-	/* E2 texture window (unused by the game; stored for completeness) */
+	/* E2 texture window - applied by the sampler via the RasterCfg snapshot */
 	uint32_t	texWindow;
 
 	/* display */
@@ -58,6 +58,13 @@ struct RasterCfg
 	/* texture state captured at prim time */
 	int		texBaseX, texBaseY, texDepth, semiMode;
 	int		clutX, clutY;
+	/*	E2 texture window, precomputed to the sampler's form:
+		coord = (coord & ~twMask) | twOr.  All-zero = no window (identity),
+		so memset-zeroed configs keep full 0..255 wrapping.  */
+	int		twMaskU, twOrU, twMaskV, twOrV;
+	/*	E1 dtd captured at prim time; the pixel pipeline applies the PS1
+		4x4 dither only to gouraud-shaded or texture-modulated pixels.  */
+	int		dither;
 };
 void Raster_Triangle(const RasterVtx *v0, const RasterVtx *v1, const RasterVtx *v2,
 					 const RasterCfg *cfg);

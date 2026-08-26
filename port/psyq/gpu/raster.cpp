@@ -9,17 +9,34 @@
 	- Semi-transparency (four ABR modes) applies to all pixels of untextured
 	  prims, and only to texels with the STP bit for textured ones.
 	- Written pixels carry the texel's STP bit (0 for untextured).
-	- Dithering: not yet (M3 - nothing in the M2 window needs it).
+	- Dithering (E1 dtd): the PS1 4x4 matrix added to the 8-bit channel
+	  value before 8->5 truncation, for gouraud-shaded and texture-modulated
+	  pixels only (flat untextured and raw-texture pixels bypass, as do
+	  rects/fills - the interpreter never sets cfg->dither for those).
+	  Dither lands on the foreground colour BEFORE any semi-transparency
+	  blend; the blend itself stays in 5-bit space (M4's emulator A/B pass
+	  is the authority if this ever shows).
 */
 #include <string.h>
 
 #include "gpu/gpu_core.h"
 
+/*	psx-spx dither offsets, indexed [y&3][x&3]  */
+static const int8_t s_dither[4][4] =
+{
+	{ -4,  0, -3,  1 },
+	{  2, -2,  3, -1 },
+	{ -3,  1, -4,  0 },
+	{  3, -1,  2, -2 },
+};
+
 /*****************************************************************************/
 static inline uint16_t sampleTexel(int u, int v, const RasterCfg *cfg)
 {
-	u &= 0xFF;
-	v &= 0xFF;
+	/*	E2 texture window: coord = (coord & ~mask*8) | (offset & mask)*8,
+		precomputed into twMask/twOr (all-zero = plain 8-bit wrap)  */
+	u = ((u & ~cfg->twMaskU) | cfg->twOrU) & 0xFF;
+	v = ((v & ~cfg->twMaskV) | cfg->twOrV) & 0xFF;
 	int ty = (cfg->texBaseY + v) & 0x1FF;
 	switch (cfg->texDepth)
 	{
@@ -46,6 +63,21 @@ static inline int mod5(int tex5, int col8)
 	return v > 31 ? 31 : v;
 }
 
+static inline int clamp8(int v)
+{
+	return v < 0 ? 0 : (v > 255 ? 255 : v);
+}
+
+/*	Modulation kept at 8 bits so the dither offset lands before truncation:
+	(t5*c8)>>4 is exactly the mod5 rule times 8.  */
+static inline int mod8dith(int tex5, int col8, int dith)
+{
+	int v = (tex5 * col8) >> 4;
+	if (v > 255)
+		v = 255;
+	return clamp8(v + dith) >> 3;
+}
+
 static inline uint16_t blendSemi(uint16_t back, int fr, int fg, int fb, int mode)
 {
 	int br = back & 0x1F, bg = (back >> 5) & 0x1F, bb = (back >> 10) & 0x1F;
@@ -69,6 +101,7 @@ static inline void shadePixel(int x, int y, int u, int v,
 							  int cr, int cg, int cb, const RasterCfg *cfg)
 {
 	int fr, fg, fb, stp = 0;
+	int dith = 0;
 
 	if (cfg->textured)
 	{
@@ -79,12 +112,28 @@ static inline void shadePixel(int x, int y, int u, int v,
 		int tr = tex & 0x1F, tg = (tex >> 5) & 0x1F, tb = (tex >> 10) & 0x1F;
 		if (cfg->rawTex)
 		{
-			fr = tr;  fg = tg;  fb = tb;
+			fr = tr;  fg = tg;  fb = tb;	/* raw texels: never dithered */
+		}
+		else if (cfg->dither)
+		{
+			/*	8-bit modulation result (min(255,(t5*c8)>>4) == the 5-bit
+				rule below carried at full precision), dither, truncate  */
+			dith = s_dither[y & 3][x & 3];
+			fr = mod8dith(tr, cr, dith);
+			fg = mod8dith(tg, cg, dith);
+			fb = mod8dith(tb, cb, dith);
 		}
 		else
 		{
 			fr = mod5(tr, cr);  fg = mod5(tg, cg);  fb = mod5(tb, cb);
 		}
+	}
+	else if (cfg->dither && cfg->gouraud)
+	{
+		dith = s_dither[y & 3][x & 3];
+		fr = clamp8(cr + dith) >> 3;
+		fg = clamp8(cg + dith) >> 3;
+		fb = clamp8(cb + dith) >> 3;
 	}
 	else
 	{

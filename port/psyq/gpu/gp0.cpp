@@ -60,6 +60,26 @@ static void logUnknownOnce(uint8_t cmd)
 }
 
 /*****************************************************************************/
+/*	Snapshot the E1/E2 texture state a prim samples with, in the sampler's
+	precomputed texture-window form.  Callers apply any embedded tpage
+	attribute first (execPoly runs its vertex loop before this).  */
+static void snapshotTexState(RasterCfg *cfg)
+{
+	cfg->texBaseX = g_gpu.texBaseX;
+	cfg->texBaseY = g_gpu.texBaseY;
+	cfg->texDepth = g_gpu.texDepth;
+	cfg->semiMode = g_gpu.semiMode;
+
+	uint32_t tw = g_gpu.texWindow;
+	int maskX = tw & 0x1F, maskY = (tw >> 5) & 0x1F;
+	int offX = (tw >> 10) & 0x1F, offY = (tw >> 15) & 0x1F;
+	cfg->twMaskU = maskX * 8;
+	cfg->twOrU   = (offX & maskX) * 8;
+	cfg->twMaskV = maskY * 8;
+	cfg->twOrV   = (offY & maskY) * 8;
+}
+
+/*****************************************************************************/
 /*	Polygons 0x20-0x3F.  Word layout per vertex k:
 	  [k>0 && gouraud: colour]  [xy]  [textured: uv | (k==0?clut:k==1?tpage:0)<<16]
 	Vertex 0's colour rides in the command word.  Returns words consumed.  */
@@ -111,10 +131,8 @@ static int execPoly(const uint32_t *w, int avail)
 		}
 	}
 
-	cfg.texBaseX = g_gpu.texBaseX;
-	cfg.texBaseY = g_gpu.texBaseY;
-	cfg.texDepth = g_gpu.texDepth;
-	cfg.semiMode = g_gpu.semiMode;
+	snapshotTexState(&cfg);
+	cfg.dither = g_gpu.dither;
 
 	Raster_Triangle(&v[0], &v[1], &v[2], &cfg);
 	if (quad)
@@ -144,10 +162,7 @@ static int execRect(const uint32_t *w, int avail)
 	cfg.textured = textured;
 	cfg.rawTex   = cmd & 1;
 	cfg.semi     = (cmd >> 1) & 1;
-	cfg.texBaseX = g_gpu.texBaseX;
-	cfg.texBaseY = g_gpu.texBaseY;
-	cfg.texDepth = g_gpu.texDepth;
-	cfg.semiMode = g_gpu.semiMode;
+	snapshotTexState(&cfg);				/* rects are never dithered */
 
 	int i = 1;
 	int x = signext11(w[i] & 0xFFFF) + g_gpu.ofsX;
@@ -191,9 +206,11 @@ static void rasterRect(int x, int y, int w, int h, int u0, int v0,
 }
 
 /*****************************************************************************/
-/*	Lines 0x40-0x5F: gouraud bit4, polyline bit3, semi bit1.
-	The game builds only LINE_F2 (and DrawGLine exists unused); polylines
-	are consumed to their terminator but not drawn.  */
+/*	Lines 0x40-0x5F: gouraud bit4, polyline bit3, semi bit1.  Polylines
+	draw segment chains to the 0x5xxx5xxx terminator word.  (The game
+	builds only LINE_F2; the rest is coverage for the M3 exit criterion.)  */
+#define POLYLINE_TERM(word)	(((word) & 0xF000F000u) == 0x50005000u)
+
 static int execLine(const uint32_t *w, int avail)
 {
 	uint8_t		cmd      = w[0] >> 24;
@@ -202,11 +219,40 @@ static int execLine(const uint32_t *w, int avail)
 
 	if (polyline)
 	{
-		logUnknownOnce(cmd);
+		RasterVtx a, b;
+		RasterCfg cfg;
+		memset(&cfg, 0, sizeof(cfg));
+		cfg.semi     = (cmd >> 1) & 1;
+		cfg.gouraud  = gouraud;
+		cfg.semiMode = g_gpu.semiMode;
+		cfg.dither   = g_gpu.dither;
+
+		a.r = (uint8_t)(w[0] & 0xFF);
+		a.g = (uint8_t)((w[0] >> 8) & 0xFF);
+		a.b = (uint8_t)((w[0] >> 16) & 0xFF);
+		b.r = a.r;  b.g = a.g;  b.b = a.b;		/* flat: command colour */
+
 		int i = 1;
-		while (i < avail && (w[i] & 0xF000F000u) != 0x50005000u)
-			i++;
-		return (i < avail) ? i + 1 : avail;
+		if (i >= avail)
+			return avail;
+		vtxFromWord(&a, w[i++]);
+
+		while (i < avail && !POLYLINE_TERM(w[i]))
+		{
+			if (gouraud)
+			{
+				b.r = (uint8_t)(w[i] & 0xFF);
+				b.g = (uint8_t)((w[i] >> 8) & 0xFF);
+				b.b = (uint8_t)((w[i] >> 16) & 0xFF);
+				i++;
+				if (i >= avail || POLYLINE_TERM(w[i]))
+					break;						/* colour without a vertex */
+			}
+			vtxFromWord(&b, w[i++]);
+			Raster_Line(&a, &b, &cfg);
+			a = b;
+		}
+		return (i < avail) ? i + 1 : avail;		/* consume the terminator */
 	}
 
 	int need = gouraud ? 4 : 3;
@@ -219,6 +265,7 @@ static int execLine(const uint32_t *w, int avail)
 	cfg.semi     = (cmd >> 1) & 1;
 	cfg.gouraud  = gouraud;
 	cfg.semiMode = g_gpu.semiMode;
+	cfg.dither   = g_gpu.dither;
 
 	a.r = (uint8_t)(w[0] & 0xFF);
 	a.g = (uint8_t)((w[0] >> 8) & 0xFF);
