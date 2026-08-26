@@ -173,6 +173,18 @@ target_link_libraries(gte_trig_test PRIVATE psyq_shim)
 
 # software-GPU unit tests: uses the vintage LIBGPU prim macros, so it compiles
 # with the shim's include arrangement (shadow headers + -idirafter psyq)
+add_executable(gte_test tests/gte_test.cpp)
+target_compile_features(gte_test PRIVATE cxx_std_17)
+target_compile_options(gte_test PRIVATE ${SBSP_PSYQ_DIRAFTER})
+target_include_directories(gte_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/psyq
+    ${SBSP_ROOT}
+    ${SBSP_ROOT}/source
+)
+target_link_options(gte_test PRIVATE -static)
+target_link_libraries(gte_test PRIVATE psyq_shim)
+
 add_executable(gpu_test tests/gpu_test.cpp)
 target_compile_features(gpu_test PRIVATE cxx_std_17)
 target_compile_options(gpu_test PRIVATE ${SBSP_PSYQ_DIRAFTER})

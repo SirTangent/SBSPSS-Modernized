@@ -50,7 +50,6 @@ void DecDCTvlcBuild3(unsigned short *table)
 	PSYQ_STUB_ONCE();
 }
 
-long ApplyMatrix() { PSYQ_STUB_ONCE(); return 0; }
 long CdRead2() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTReset() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTin() { PSYQ_STUB_ONCE(); return 0; }
@@ -58,7 +57,6 @@ long DecDCTout() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
-long InitGeom() { PSYQ_STUB_ONCE(); return 0; }
 long InitXMData() { PSYQ_STUB_ONCE(); return 0; }
 long MemCardAccept() { PSYQ_STUB_ONCE(); return 0; }
 long MemCardInit() { PSYQ_STUB_ONCE(); return 0; }
@@ -74,15 +72,6 @@ long MemCardStart() { PSYQ_STUB_ONCE(); return 0; }
 long MemCardStop() { PSYQ_STUB_ONCE(); return 0; }
 long MemCardUnformat() { PSYQ_STUB_ONCE(); return 0; }
 long MemCardWriteFile() { PSYQ_STUB_ONCE(); return 0; }
-long RotMatrixZ() { PSYQ_STUB_ONCE(); return 0; }
-long RotMatrix_gte() { PSYQ_STUB_ONCE(); return 0; }
-long RotTransPers() { PSYQ_STUB_ONCE(); return 0; }
-long RotTransSV() { PSYQ_STUB_ONCE(); return 0; }
-long ScaleMatrix() { PSYQ_STUB_ONCE(); return 0; }
-long SetGeomOffset() { PSYQ_STUB_ONCE(); return 0; }
-long SetGeomScreen() { PSYQ_STUB_ONCE(); return 0; }
-long SetRotMatrix() { PSYQ_STUB_ONCE(); return 0; }
-long SetTransMatrix() { PSYQ_STUB_ONCE(); return 0; }
 long SpuInit() { PSYQ_STUB_ONCE(); return 0; }
 long SpuInitMalloc() { PSYQ_STUB_ONCE(); return 0; }
 long SpuReserveReverbWorkArea() { PSYQ_STUB_ONCE(); return 0; }
