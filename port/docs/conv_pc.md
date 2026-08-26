@@ -121,7 +121,7 @@ only the headers that cannot work on x86:
 
 ## Game-source changes (M3)
 
-15. **`source/system/main.cpp:89` (USE_SCREEN_UTILS gate)** — the DEBUG
+15. **`source/system/main.cpp:89` (USE_SCREEN_UTILS gate)** ï¿½ the DEBUG
     screen utils (SELECT=VRamViewer, L2+START=SaveScreen) were gated on
     `__FILE_SYSTEM__==PC && !__USER_CDBUILD__`, i.e. compiled out of every
     CD build.  Both outer conditions gained a `|| !defined(PSX_MIPS_ASM)`
@@ -130,6 +130,40 @@ only the headers that cannot work on x86:
     pcfile.cpp`).  On the PlayStation build `PSX_MIPS_ASM` is defined, so
     both conditions reduce to the originals - verified by the PSX
     regression build.
+
+## Game-source changes (M4)
+
+16. **`source/system/main.cpp` (boot-scene select)** - the final `#else`
+    branch (`setNextScene(&FrontEndScene)`) gained a `!defined(PSX_MIPS_ASM)`
+    arm that asks the shim's `Port_BootLevel()` (port/psyq/host/args.cpp,
+    `--level` / `SBSP_BOOT_LEVEL`) for a LvlTable index: >=0 sets
+    `s_globalLevelSelectThing` and boots straight into `GameScene` for
+    testing, -1 keeps the original frontend boot.  Same shape as the
+    vintage `__USER_daveo__` dev path a few lines above.  On the
+    PlayStation build the arm reduces to the original line - verified by
+    the PSX regression build.
+
+17. **`source/platform/platform.cpp` (`CNpcPlatform::setCollisionAngle`)** -
+    latent null dereference, crashed on the first C1L1 boot: platforms
+    `postInit` during `CLevel::init`, which runs BEFORE `createPlayer()`
+    (game.cpp), so `GameScene.getPlayer()` is NULL and
+    `player->isOnPlatform()` reads NULL+offset.  On PS1 address 0 is
+    readable kernel RAM and the garbage never compares equal to a platform
+    pointer, so the bug was invisible; Win32 faults.  Guarded with
+    `player&&` - behaviour-identical to what the hardware actually did.
+    Same latent-bug class as entry #13.
+
+18. **`source/level/layertile3d.cpp` (tile-window margins)** - user-visible
+    on PC: the 3D action layer vanished from the bottom (and, at worst
+    scroll phase, ~9px of the right edge) of the view.  The USA margins
+    (`SCREEN_TILE_ADJ_D=1`, `_R=3`) are tuned to CRT overscan: the far
+    plane (z=+64) projects at 378/442 = 0.855, so the bottom 8-21 lines of
+    the 256-line framebuffer were never covered - and never visible on an
+    NTSC TV.  A PC window shows the whole framebuffer.  Fix is the one the
+    original devs made for PAL's taller visible area (EUR `D=3`, with its
+    own comment saying exactly this): a `!defined(PSX_MIPS_ASM)` arm with
+    `D=3, R=4`.  Both console territory arms are untouched - verified by
+    the PSX regression build.
 
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 

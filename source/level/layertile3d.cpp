@@ -23,7 +23,17 @@ int			ShowPolyz=0;
 #endif
 
 static const int	BLOCK_SIZE				=16;
-#if defined(__TERRITORY_EUR__)
+#if !defined(PSX_MIPS_ASM)
+// PC port: the console margins are tuned to CRT overscan - the far plane
+// (z=+64, scale 378/442) leaves the bottom ~8-21 lines and right ~9 pixels
+// of the framebuffer uncovered, which a TV never displayed but a window
+// shows.  EUR already proved the taller D (PAL displays more lines); the
+// right edge additionally needs one more column at worst scroll phase.
+static const int	SCREEN_TILE_ADJ_U		=2;
+static const int	SCREEN_TILE_ADJ_D		=3;
+static const int	SCREEN_TILE_ADJ_L		=3;
+static const int	SCREEN_TILE_ADJ_R		=4;
+#elif defined(__TERRITORY_EUR__)
 static const int	SCREEN_TILE_ADJ_U		=2;
 static const int	SCREEN_TILE_ADJ_D		=3;	// Extra 2 lines needed, cos of extra height & perspective :o(
 static const int	SCREEN_TILE_ADJ_L		=3;
