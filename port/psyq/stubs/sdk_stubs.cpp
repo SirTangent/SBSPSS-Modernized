@@ -85,7 +85,13 @@ long StSetStream() { PSYQ_STUB_ONCE(); return 0; }
 long StUnSetRing() { PSYQ_STUB_ONCE(); return 0; }
 long XM_ClearSFXRange() { PSYQ_STUB_ONCE(); return 0; }
 long XM_CloseVAB() { PSYQ_STUB_ONCE(); return 0; }
-long XM_GetFeedback() { PSYQ_STUB_ONCE(); return 0; }
+/*	Nonzero = "this song/SFX has finished" (xmplay.cpp:208-215): the caller
+	marks the channel SILENT and XM_Quits it, freeing it for reuse.  The old
+	0 return meant "still playing" forever - channels leaked one one-shot
+	SFX at a time until playSfx() permanently returned NOT_PLAYING (~10
+	plays in).  With no audio until M5, everything finishing instantly is
+	the correct degenerate behaviour.  */
+long XM_GetFeedback() { PSYQ_STUB_ONCE(); return 1; }
 long XM_GetFileHeaderSize() { PSYQ_STUB_ONCE(); return 0; }
 long XM_GetSampleAddress() { PSYQ_STUB_ONCE(); return 0; }
 long XM_GetSongSize() { PSYQ_STUB_ONCE(); return 0; }

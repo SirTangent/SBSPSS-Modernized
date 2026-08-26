@@ -121,6 +121,7 @@ extern "C" void Port_Pump(void)
 {
 	extern void Host_VBlank(unsigned long vblankNo);	/* host/window.cpp */
 	extern void Port_RCnt2Vblank(int vblankHz);			/* api/libapi_stubs.cpp */
+	extern void Port_CdVblank(void);					/* cd/cd.cpp */
 
 	/*	Nested pumps are a complete no-op.  Port_Pump can be reached from
 		inside g_vsyncCallback (anything the game's vblank work touches that
@@ -172,6 +173,7 @@ extern "C" void Port_Pump(void)
 		if (g_vsyncCallback)
 			g_vsyncCallback();		/* game vblank work first (loading icon...) */
 		Port_RCnt2Vblank(g_hz);
+		Port_CdVblank();			/* armed XA end-of-stream delivery */
 		Host_VBlank(g_vblank);		/* ...then events + present + tooling */
 		paceLog();
 		inPump = 0;
