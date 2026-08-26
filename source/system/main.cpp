@@ -257,6 +257,11 @@ void	MainLoop()
 int			TestFMA=-1;
 #endif
 
+#if	!defined(PSX_MIPS_ASM)
+extern "C" int	Port_BootLevel(void);			/* port/psyq/host/args.cpp */
+extern int		s_globalLevelSelectThing;		/* level/level.h */
+#endif
+
 int 	main()
 {
 	CFileIO::GetAllFilePos();
@@ -278,7 +283,25 @@ int 	main()
 #elif	defined(__USER_charles__)
 	GameState::setNextScene( &MapScene );
 #else
+	/*	PC port: --level / SBSP_BOOT_LEVEL boots straight into a level for
+		testing - the shim's Port_BootLevel() returns the LvlTable index, or
+		-1 for the normal boot.  Same shape as the __USER_daveo__ dev path
+		above.  The PlayStation build defines PSX_MIPS_ASM (asmport.h), so
+		it reduces to the original line.  */
+	#if	!defined(PSX_MIPS_ASM)
+	{
+		int		bootLevel=Port_BootLevel();
+		if (bootLevel>=0)
+		{
+			s_globalLevelSelectThing=bootLevel;
+			GameState::setNextScene( &GameScene );
+		}
+		else
+			GameState::setNextScene( &FrontEndScene );
+	}
+	#else
 	GameState::setNextScene( &FrontEndScene );
+	#endif
 #endif
 
 //	CXAStream::Init();			// PKG - Stuck here so that it doesn't affect any startup stuff (7/8/00)
