@@ -15,7 +15,8 @@
 
 	Test tooling: SBSP_PAD_SCRIPT="vblank:HEXmask[,vblank:HEXmask...]"
 	injects buttons for automated runs.  Each entry applies from its vblank
-	until the next entry's vblank; the mask is the active-HIGH 16-bit
+	until the next one comes due (by vblank, not by listing order); the
+	mask is the active-HIGH 16-bit
 	(Button1<<8)|Button2 hardware word (LIBETC.H order), e.g. START=0800,
 	CROSS=0040, SELECT=0100, DOWN=4000.
 */
@@ -84,12 +85,29 @@ static void scriptParse(void)
 		fprintf(stderr, "[input] SBSP_PAD_SCRIPT: %d entries\n", g_scriptCount);
 }
 
+/*	The entry in force is the LATEST one that has come due - selected by
+	vblank, never by position in the string.  (Keeping the last array-order
+	match instead made "600:0000,300:0800" hold START forever: at vblank 700
+	both are due and the later-listed, earlier-timed entry won.  Scripts are
+	normally written in ascending order, but nothing enforces that and a
+	silently mistimed automated run is expensive to diagnose.)  */
 static unsigned scriptMask(unsigned long vblank)
 {
-	unsigned mask = 0;
+	unsigned		mask = 0;
+	int				found = 0;
+	unsigned long	best = 0;
+
 	for (int i = 0; i < g_scriptCount; i++)
-		if (vblank >= g_script[i].vblank)
-			mask = g_script[i].mask;
+	{
+		if (vblank < g_script[i].vblank)
+			continue;
+		if (!found || g_script[i].vblank >= best)
+		{
+			best  = g_script[i].vblank;
+			mask  = g_script[i].mask;
+			found = 1;
+		}
+	}
 	return mask;
 }
 
@@ -114,8 +132,20 @@ extern "C" void Port_InputHandleEvent(const void *evv)
 }
 
 /*****************************************************************************/
+/*	Port_InputFrame runs on every emulated vblank, including before
+	Host_EnsureVideo has created the window and on hosts where it never
+	will (the SBSP_PAD_SCRIPT path deliberately does not depend on SDL).
+	Neither reader may be called before SDL_Init.  */
+static bool sdlInputUp(void)
+{
+	return SDL_WasInit(SDL_INIT_VIDEO) != 0;
+}
+
 static unsigned keyboardMask(void)
 {
+	if (!sdlInputUp())
+		return 0;
+
 	const bool *k = SDL_GetKeyboardState(NULL);
 	unsigned m = 0;
 	if (!k)
@@ -139,7 +169,7 @@ static unsigned keyboardMask(void)
 
 static unsigned gamepadMask(void)
 {
-	SDL_Gamepad *p = g_gamepad;
+	SDL_Gamepad *p = sdlInputUp() ? g_gamepad : NULL;
 	unsigned m = 0;
 	if (!p)
 		return 0;
@@ -162,8 +192,8 @@ static unsigned gamepadMask(void)
 
 static unsigned char stickByte(SDL_Gamepad *p, SDL_GamepadAxis axis)
 {
-	if (!p)
-		return 0x80;
+	if (!p || !sdlInputUp())
+		return 0x80;			/* centred */
 	int v = (SDL_GetGamepadAxis(p, axis) >> 8) + 128;	/* -32768..32767 -> 0..255 */
 	return (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
 }

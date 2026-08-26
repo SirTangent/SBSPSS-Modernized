@@ -170,9 +170,16 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 				ev.type == SDL_EVENT_GAMEPAD_REMOVED)
 				Port_InputHandleEvent(&ev);
 		}
-
-		Port_InputFrame(vblankNo);	/* rebuild the PS1 pad packet */
 	}
+
+	/*	Outside the video gate on purpose.  SBSP_PAD_SCRIPT needs no SDL at
+		all, and the degraded no-window mode this file promises (frame dumps
+		+ SBSP_EXIT_AFTER on a display-less machine or CI) is exactly where
+		scripted input is the ONLY way to navigate - gating it here left
+		such runs dumping the title screen forever, without even the
+		"[input] SBSP_PAD_SCRIPT: N entries" line to say why.  The keyboard
+		and gamepad readers already handle their absence.  */
+	Port_InputFrame(vblankNo);	/* rebuild the PS1 pad packet */
 
 	for (int i = 0; i < g_dumpCount; i++)
 	{
