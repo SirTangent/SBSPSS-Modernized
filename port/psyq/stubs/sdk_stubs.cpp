@@ -50,7 +50,13 @@ void DecDCTvlcBuild3(unsigned short *table)
 	PSYQ_STUB_ONCE();
 }
 
-long CdRead2() { PSYQ_STUB_ONCE(); return 0; }
+/*	CdRead2 must report "streaming started" (nonzero): fmv.cpp's strKickCD
+	spins `while(CdRead2(...)==0)` with no pump, so a 0 here hard-hangs the
+	THQ FMV scene right after the Nick logo.  With 1, StGetNext's bounded
+	no-data countdown makes strNextVlc return -1 and FMV_play falls through
+	its whole decode loop - both FMV scenes skip cleanly to the main titles.
+	Real streaming lands in M7.  */
+long CdRead2() { PSYQ_STUB_ONCE(); return 1; }
 long DecDCTReset() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTin() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTout() { PSYQ_STUB_ONCE(); return 0; }
