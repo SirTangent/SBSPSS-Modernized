@@ -27,15 +27,15 @@ void GTEport_Op(u32 op);
 static const uint32_t s_tagToCop2[79] =
 {
 	0,
-	0x4A180001,	/*  1 rtps      */
+	COP2_RTPS,	/*  1 rtps      */
 	0x4A280030,	/*  2 rtpt      */
-	0x4A480012,	/*  3 rt        = MVMVA sf=1 RT*V0+TR  */
+	COP2_RT,	/*  3 rt        = MVMVA sf=1 RT*V0+TR  */
 	0x4A486012,	/*  4 rtv0      */
 	0x4A48E012,	/*  5 rtv1      */
 	0x4A496012,	/*  6 rtv2      */
 	0x4A49E012,	/*  7 rtir      */
 	0x4A41E012,	/*  8 rtir_sf0  */
-	0x4A480012,	/*  9 rtv0tr    */
+	COP2_RT,	/*  9 rtv0tr    */
 	0x4A488012,	/* 10 rtv1tr    */
 	0x4A490012,	/* 11 rtv2tr    */
 	0x4A498012,	/* 12 rtirtr    */

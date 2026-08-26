@@ -20,10 +20,6 @@
 extern "C" int rsin(int a);
 extern "C" int rcos(int a);
 
-/*	cop2 words (from the DMPSX table in gteport.cpp)  */
-#define COP2_RTPS	0x4A180001u
-#define COP2_RT		0x4A480012u		/* MVMVA sf=1: RT*V0 + TR */
-
 static void loadV0(const SVECTOR *v)
 {
 	GTE_WriteData(0, ((uint32_t)(uint16_t)v->vx) | ((uint32_t)(uint16_t)v->vy << 16));

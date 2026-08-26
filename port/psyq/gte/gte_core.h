@@ -22,6 +22,13 @@
 extern "C" {
 #endif
 
+/*	The two hardware cop2 words libgte's C functions issue directly
+	(libgte_fns.cpp).  They live here rather than at the call site so they
+	cannot drift from gteport.cpp's DMPSX tag table, which names these same
+	constants for the corresponding tag entries.  */
+#define COP2_RTPS	0x4A180001u		/* RTPS  */
+#define COP2_RT		0x4A480012u		/* MVMVA sf=1: RT*V0 + TR */
+
 void		GTE_ExecuteCop2(uint32_t inst);		/* hardware cop2 word */
 uint32_t	GTE_ReadData(int reg);				/* mfc2 */
 void		GTE_WriteData(int reg, uint32_t v);	/* mtc2 */

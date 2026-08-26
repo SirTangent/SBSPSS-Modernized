@@ -9,7 +9,7 @@
 	views on demand.  FLAG is rebuilt from zero by every command, exactly
 	like hardware.
 */
-#include <stdio.h>
+#include "stub_log.h"
 #include "gte_core.h"
 
 static uint32_t s_dr[32];	/* data registers   (mtc2/mfc2)  */
@@ -109,7 +109,10 @@ static void setIR0(int32_t v)					/* sat 0..0x1000, flag 12 */
 	s_dr[8] = (uint32_t)v;
 }
 
-static void pushSZ(int64_t v)					/* sat 0..0xFFFF, flag 18 */
+/*	The Z saturation rule: 0..0xFFFF with FLAG bit 18.  Shared by the SZ
+	FIFO push and AVSZ3/4's OTZ result so a hardware edge case can only be
+	fixed in one place.  */
+static uint32_t satZ(int64_t v)
 {
 	if (v < 0)
 	{
@@ -121,10 +124,15 @@ static void pushSZ(int64_t v)					/* sat 0..0xFFFF, flag 18 */
 		v = 0xFFFF;
 		flagB(18);
 	}
+	return (uint32_t)v;
+}
+
+static void pushSZ(int64_t v)
+{
 	s_dr[16] = s_dr[17];
 	s_dr[17] = s_dr[18];
 	s_dr[18] = s_dr[19];
-	s_dr[19] = (uint32_t)v;
+	s_dr[19] = satZ(v);
 }
 
 static int32_t satSXY(int32_t v, int flagBit)	/* sat -0x400..0x3FF */
@@ -216,10 +224,48 @@ static uint32_t divUNR(uint32_t h, uint32_t sz3)
 }
 
 /*****************************************************************************/
+/*	AVSZ3/AVSZ4 - OTZ = ZSFn * (sum of the newest n entries of the SZ FIFO),
+	>>12 and Z-saturated.  One helper: the two ops differ only in the scale
+	register and how far back into the FIFO they reach.  */
+
+static void opAVSZ(int zsfReg, int n)
+{
+	int64_t sum = 0;
+	for (int i = 4 - n; i < 4; i++)
+		sum += (uint16_t)s_dr[16 + i];			/* SZ0..SZ3 = dr16..dr19 */
+
+	int64_t m = (int64_t)(int16_t)s_cr[zsfReg] * sum;
+	setMAC0(m);
+	s_dr[7] = satZ(m >> 12);					/* OTZ */
+}
+
+/*****************************************************************************/
+/*	The RT/TR control words RTPS and RTPT project through.  Unpacked once
+	per instruction (RtTr) rather than once per vertex: RTPT is the hottest
+	path in the whole core - gte_rtpt_b runs per triangle over all visible
+	level geometry (source/level/layertile3d.cpp, source/gfx/actor.cpp) -
+	and the packed-halfword decode is pure repeated work there, since only
+	GTE_WriteCtrl can change it.  */
+struct RtTr
+{
+	int16_t	m[3][3];
+	int32_t	tr[3];
+};
+
+static void loadRtTr(RtTr *g)
+{
+	for (int i = 0; i < 3; i++)
+	{
+		for (int j = 0; j < 3; j++)
+			g->m[i][j] = mtxEl(0, i, j);
+		g->tr[i] = trReg(i);
+	}
+}
+
 /*	RTPS core, shared with RTPT.  dq: run the depth-cue calc (RTPS always;
 	RTPT only on the last vertex).  */
 
-static void rtpsCore(int v, int sf, int lm, int dq)
+static void rtpsCore(const RtTr *g, int v, int sf, int lm, int dq)
 {
 	int		shift = sf * 12;
 	int16_t	vx = vXofs(v), vy = vYofs(v), vz = vZofs(v);
@@ -227,10 +273,10 @@ static void rtpsCore(int v, int sf, int lm, int dq)
 
 	for (int i = 1; i <= 3; i++)
 	{
-		int64_t m = (int64_t)trReg(i - 1) << 12;
-		m = ext44(i, m + (int64_t)mtxEl(0, i - 1, 0) * vx);
-		m = ext44(i, m + (int64_t)mtxEl(0, i - 1, 1) * vy);
-		m = ext44(i, m + (int64_t)mtxEl(0, i - 1, 2) * vz);
+		int64_t m = (int64_t)g->tr[i - 1] << 12;
+		m = ext44(i, m + (int64_t)g->m[i - 1][0] * vx);
+		m = ext44(i, m + (int64_t)g->m[i - 1][1] * vy);
+		m = ext44(i, m + (int64_t)g->m[i - 1][2] * vz);
 		if (i == 3)
 			full3 = m;
 		mac[i] = m >> shift;
@@ -379,17 +425,6 @@ static void depthCue(int sf, int lm, int64_t base1, int64_t base2, int64_t base3
 }
 
 /*****************************************************************************/
-static void logUnknownOnce(uint32_t op)
-{
-	static uint64_t seen;
-	if (seen & (1ull << op))
-		return;
-	seen |= 1ull << op;
-	fprintf(stderr, "[gte] unimplemented cop2 op 0x%02X (unreached by game "
-					"code - see gte_core.cpp)\n", (unsigned)op);
-}
-
-/*****************************************************************************/
 extern "C" void GTE_ExecuteCop2(uint32_t inst)
 {
 	int sf = (inst >> 19) & 1;
@@ -401,14 +436,22 @@ extern "C" void GTE_ExecuteCop2(uint32_t inst)
 	switch (inst & 0x3F)
 	{
 	case 0x01:									/* RTPS */
-		rtpsCore(0, sf, lm, 1);
+	{
+		RtTr g;
+		loadRtTr(&g);
+		rtpsCore(&g, 0, sf, lm, 1);
 		break;
+	}
 
 	case 0x30:									/* RTPT */
-		rtpsCore(0, sf, lm, 0);
-		rtpsCore(1, sf, lm, 0);
-		rtpsCore(2, sf, lm, 1);
+	{
+		RtTr g;
+		loadRtTr(&g);							/* once, not once per vertex */
+		rtpsCore(&g, 0, sf, lm, 0);
+		rtpsCore(&g, 1, sf, lm, 0);
+		rtpsCore(&g, 2, sf, lm, 1);
 		break;
+	}
 
 	case 0x12:									/* MVMVA */
 		opMVMVA(inst);
@@ -425,46 +468,12 @@ extern "C" void GTE_ExecuteCop2(uint32_t inst)
 	}
 
 	case 0x2D:									/* AVSZ3 */
-	{
-		int64_t m = (int64_t)(int16_t)s_cr[29]
-				  * ((int64_t)(uint16_t)s_dr[17] + (uint16_t)s_dr[18]
-													+ (uint16_t)s_dr[19]);
-		setMAC0(m);
-		int64_t otz = m >> 12;
-		if (otz < 0)
-		{
-			otz = 0;
-			flagB(18);
-		}
-		else if (otz > 0xFFFF)
-		{
-			otz = 0xFFFF;
-			flagB(18);
-		}
-		s_dr[7] = (uint32_t)otz;
+		opAVSZ(29, 3);
 		break;
-	}
 
 	case 0x2E:									/* AVSZ4 */
-	{
-		int64_t m = (int64_t)(int16_t)s_cr[30]
-				  * ((int64_t)(uint16_t)s_dr[16] + (uint16_t)s_dr[17]
-					+ (uint16_t)s_dr[18] + (uint16_t)s_dr[19]);
-		setMAC0(m);
-		int64_t otz = m >> 12;
-		if (otz < 0)
-		{
-			otz = 0;
-			flagB(18);
-		}
-		else if (otz > 0xFFFF)
-		{
-			otz = 0xFFFF;
-			flagB(18);
-		}
-		s_dr[7] = (uint32_t)otz;
+		opAVSZ(30, 4);
 		break;
-	}
 
 	case 0x28:									/* SQR */
 		for (int i = 1; i <= 3; i++)
@@ -537,7 +546,9 @@ extern "C" void GTE_ExecuteCop2(uint32_t inst)
 	default:
 		/*	NC lighting family / CC / CDP / DCPL: no game code path reaches
 			them (grep census in the M3 plan) - loudly absent, not silent.  */
-		logUnknownOnce(inst & 0x3F);
+		PSYQ_LOG_ONCE_KEYED(inst & 0x3F,
+			"[gte] unimplemented cop2 op 0x%02X (unreached by game code "
+			"- see gte_core.cpp)\n", (unsigned)(inst & 0x3F));
 		break;
 	}
 
