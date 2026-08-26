@@ -85,8 +85,13 @@ CPaulScene s_paulScene;
 #endif
 
 
-#if	__FILE_SYSTEM__==PC
-	#if	!defined(__USER_CDBUILD__)
+/*	PC port: the screen utils (VRamViewer/SaveScreen) are debug tools worth
+	keeping on any host with a real filesystem - the Win32 shim implements
+	the libsn PC* file calls they need.  The extra !PSX_MIPS_ASM arms keep
+	the PlayStation build exactly as before (asmport.h defines PSX_MIPS_ASM
+	there, so both conditions reduce to the originals).  */
+#if	__FILE_SYSTEM__==PC || !defined(PSX_MIPS_ASM)
+	#if	!defined(__USER_CDBUILD__) || !defined(PSX_MIPS_ASM)
 		#if defined(__VERSION_DEBUG__)
 			#define	USE_SCREEN_UTILS
 		#endif
