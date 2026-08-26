@@ -36,11 +36,6 @@ long SpuIsTransferCompleted() { PSYQ_STUB_ONCE(); return 1; }
 	cleanly  */
 long StGetNext() { PSYQ_STUB_ONCE(); return 1; }
 
-/*	memcard.cpp:1242 runs its completion handlers only when != 0
-	(0 == still processing would poll forever); -1 == error resolves every
-	operation to the failure path ("no card")  */
-long MemCardSync() { PSYQ_STUB_ONCE(); return -1; }
-
 /*	Real prototype (tools/vlc/include/VLC_BIT.H): the caller expects its
 	table filled through the pointer.  M7 must implement Build3 and vlc3
 	TOGETHER - a real DecDCTvlc3 over this no-op walks an unbuilt table.  */
@@ -64,20 +59,6 @@ long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
 long InitXMData() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardAccept() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardInit() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardEnd() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardClose() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardCreateFile() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardDeleteFile() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardExist() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardFormat() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardGetDirentry() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardReadFile() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardStart() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardStop() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardUnformat() { PSYQ_STUB_ONCE(); return 0; }
-long MemCardWriteFile() { PSYQ_STUB_ONCE(); return 0; }
 long SpuInit() { PSYQ_STUB_ONCE(); return 0; }
 long SpuInitMalloc() { PSYQ_STUB_ONCE(); return 0; }
 long SpuReserveReverbWorkArea() { PSYQ_STUB_ONCE(); return 0; }
