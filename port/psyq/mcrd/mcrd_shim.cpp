@@ -22,12 +22,20 @@ static int	s_pending;			/* one command deep - all the game needs */
 static long	s_pendingCmd;
 static long	s_pendingResult;
 
+/*	The async entry points return "was the command REGISTERED", not an error
+	code: the game treats 0 as "could not register" and abandons the
+	operation without ever waiting for a completion (memcard.cpp:970
+	HandleCmd_ReadFile and :1077 HandleCmd_WriteFile both drop straight back
+	to CmdNone/SS_Idle on 0, leaving the save/load UI waiting on a callback
+	that never comes AND a latched completion misattributed to the next
+	command).  Registration always succeeds here; the ABSENCE of a card is
+	reported through the completion's result, not through this return.  */
 static long queueCmd(long cmd, long result)
 {
 	s_pending       = 1;
 	s_pendingCmd    = cmd;
 	s_pendingResult = result;
-	return 0;					/* command accepted */
+	return 1;					/* command registered */
 }
 
 extern "C" {
