@@ -165,34 +165,24 @@ target_link_libraries(sbsp_headless PRIVATE
     psyq_shim
 )
 
-add_executable(gte_trig_test tests/gte_trig_test.cpp)
-target_compile_features(gte_trig_test PRIVATE cxx_std_17)
-target_include_directories(gte_trig_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/psyq)
-target_link_options(gte_trig_test PRIVATE -static)
-target_link_libraries(gte_trig_test PRIVATE psyq_shim)
+# Unit tests that exercise the shim directly (no game code): C++17, statically
+# linked against psyq_shim, and compiled with the shim's own include
+# arrangement - the shadow SDK headers first, the vintage PSY-Q headers only
+# via -idirafter - so a test may use the real LIBGPU/LIBGTE prim macros.
+function(sbsp_shim_test name)
+    add_executable(${name} tests/${name}.cpp)
+    target_compile_features(${name} PRIVATE cxx_std_17)
+    target_compile_options(${name} PRIVATE ${SBSP_PSYQ_DIRAFTER})
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/psyq
+        ${SBSP_ROOT}
+        ${SBSP_ROOT}/source
+    )
+    target_link_options(${name} PRIVATE -static)
+    target_link_libraries(${name} PRIVATE psyq_shim)
+endfunction()
 
-# software-GPU unit tests: uses the vintage LIBGPU prim macros, so it compiles
-# with the shim's include arrangement (shadow headers + -idirafter psyq)
-add_executable(gte_test tests/gte_test.cpp)
-target_compile_features(gte_test PRIVATE cxx_std_17)
-target_compile_options(gte_test PRIVATE ${SBSP_PSYQ_DIRAFTER})
-target_include_directories(gte_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/psyq
-    ${SBSP_ROOT}
-    ${SBSP_ROOT}/source
-)
-target_link_options(gte_test PRIVATE -static)
-target_link_libraries(gte_test PRIVATE psyq_shim)
-
-add_executable(gpu_test tests/gpu_test.cpp)
-target_compile_features(gpu_test PRIVATE cxx_std_17)
-target_compile_options(gpu_test PRIVATE ${SBSP_PSYQ_DIRAFTER})
-target_include_directories(gpu_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/psyq
-    ${SBSP_ROOT}
-    ${SBSP_ROOT}/source
-)
-target_link_options(gpu_test PRIVATE -static)
-target_link_libraries(gpu_test PRIVATE psyq_shim)
+sbsp_shim_test(gte_trig_test)   # exact fixed-point trig fixtures (M1)
+sbsp_shim_test(gte_test)        # software cop2 / libgte fixtures (M3)
+sbsp_shim_test(gpu_test)        # software GPU: VRAM ops, OT walker, goldens
