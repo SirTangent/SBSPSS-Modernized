@@ -247,6 +247,121 @@ int main()
 		checkPx(50, 50, want, "semi mode 0: (B+F)/2");
 	}
 
+	/* --- dithering: PS1 4x4 matrix on gouraud pixels (E1 dtd) ------------- */
+	{
+		resetEnv();
+		/*	uniform mid-grey gouraud triangle: interpolation is exact, so
+			every inner pixel is 128 + dither[y&3][x&3], then >>3  */
+		static const uint32_t on[] =
+		{
+			0xE1000200,							/* dtd = 1 */
+			0x30808080, 0x00640064,				/* (100,100) */
+			0x00808080, 0x006400A4,				/* (164,100) */
+			0x00808080, 0x00A40064,				/* (100,164) */
+		};
+		GPU_ExecWords(on, 7);
+		checkPx(100, 100, 15 * 0x421, "dither (0,0): 128-4 >> 3");
+		checkPx(101, 100, 16 * 0x421, "dither (1,0): 128+0 >> 3");
+		checkPx(100, 101, 16 * 0x421, "dither (0,1): 128+2 >> 3");
+		checkPx(101, 101, 15 * 0x421, "dither (1,1): 128-2 >> 3");
+
+		resetEnv();
+		static const uint32_t off[] =
+		{
+			0xE1000000,							/* dtd = 0 */
+			0x30808080, 0x00640064,
+			0x00808080, 0x006400A4,
+			0x00808080, 0x00A40064,
+		};
+		GPU_ExecWords(off, 7);
+		checkPx(100, 100, 16 * 0x421, "no dither: 128 >> 3");
+		checkPx(101, 101, 16 * 0x421, "no dither: 128 >> 3 everywhere");
+	}
+
+	/* --- texture window (E2): u -> (u & ~mask*8) | (offset&mask)*8 -------- */
+	{
+		resetEnv();
+		for (int k = 0; k < 8; k++)
+		{
+			g_vram[0][k]     = (uint16_t)(0x7C00 + k);	/* visible if window ignored */
+			g_vram[0][8 + k] = (uint16_t)(0x108 + k);	/* the windowed texels */
+		}
+		static const uint32_t rect[] =
+		{
+			0xE1000100,							/* 15bpp, base (0,0), dtd 0 */
+			0xE2000401,							/* maskX=1, offX=1: u |= 8 */
+			0x65808080,							/* raw textured rect */
+			0x0050012C,							/* xy = (300,80) */
+			0x00000000,							/* uv = (0,0), clut unused */
+			0x00010008,							/* 8x1 */
+			0xE2000000,							/* window off again */
+		};
+		GPU_ExecWords(rect, 7);
+		for (int k = 0; k < 8; k++)
+			checkPx(300 + k, 80, (uint16_t)(0x108 + k), "texture window remaps u");
+	}
+
+	/* --- polylines: segment chains to the 0x5xxx5xxx terminator ----------- */
+	{
+		resetEnv();
+		static const uint32_t lines[] =
+		{
+			0xE1000000,							/* dtd 0 */
+			0x48FFFFFF,							/* flat white polyline */
+			0x000A000A,							/* (10,10) */
+			0x000A0014,							/* (20,10) */
+			0x00140014,							/* (20,20) */
+			0x55555555,							/* terminator */
+			0x580000FF,							/* gouraud polyline, red */
+			0x000A0028,							/* (40,10) */
+			0x000000FF, 0x000A003C,				/* red again, (60,10) */
+			0x55555555,
+		};
+		GPU_ExecWords(lines, 11);
+		checkPx(10, 10, 0x7FFF, "polyline start");
+		checkPx(15, 10, 0x7FFF, "polyline mid segment 1");
+		checkPx(20, 10, 0x7FFF, "polyline joint");
+		checkPx(20, 15, 0x7FFF, "polyline mid segment 2");
+		checkPx(20, 20, 0x7FFF, "polyline end");
+		checkPx(50, 10, 0x001F, "gouraud polyline, uniform red");
+	}
+
+	/* --- polyline terminator rules: only at a vertex GROUP's first word --- */
+	{
+		resetEnv();
+
+		/*	An empty chain (terminator where vertex 1 would be) must draw
+			nothing AND consume exactly two words, so the primitive that
+			follows is decoded as a command and not as polyline data.  */
+		static const uint32_t empty[] =
+		{
+			0xE1000000,							/* dtd 0 */
+			0x48FFFFFF,							/* flat white polyline... */
+			0x55555555,							/* ...terminated immediately */
+			0x68FFFFFF, 0x00500050,				/* 1x1 white dot at (80,80) */
+		};
+		GPU_ExecWords(empty, 5);
+		checkPx(80, 80, 0x7FFF, "stream stays in sync past an empty polyline");
+
+		/*	A vertex whose halfwords both start with nibble 5 is a legal
+			coordinate, not a terminator: for a shaded chain the terminator
+			is only read where a COLOUR word belongs.  (0x50A0_5078 =
+			x=0x5078=20600, y=0x50A0=20640 - both wrap to sane 11-bit
+			signed coords, and the segment to it must still be drawn.)  */
+		static const uint32_t shaded[] =
+		{
+			0x580000FF,							/* gouraud polyline, red */
+			0x00780028,							/* (40,120) */
+			0x000000FF, 0x00780032,				/* red, (50,120) */
+			0x000000FF, 0x50A05078,				/* red, vertex that LOOKS like 5xxx5xxx */
+			0x55555555,							/* the real terminator */
+			0x68FFFFFF, 0x00640064,				/* 1x1 white dot at (100,100) */
+		};
+		GPU_ExecWords(shaded, 9);
+		checkPx(45, 120, 0x001F, "shaded polyline segment 1");
+		checkPx(100, 100, 0x7FFF, "5xxx5xxx vertex did not fake a terminator");
+	}
+
 	if (g_failures)
 	{
 		std::printf("gpu test FAILED (%d)\n", g_failures);

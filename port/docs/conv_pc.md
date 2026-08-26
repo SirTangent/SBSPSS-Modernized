@@ -119,6 +119,18 @@ only the headers that cannot work on x86:
       dual-pathed on `PSX_MIPS_ASM`: EGCS insists on `(long (*)(...))`,
       which modern GCC rejects, and vice versa.
 
+## Game-source changes (M3)
+
+15. **`source/system/main.cpp:89` (USE_SCREEN_UTILS gate)** — the DEBUG
+    screen utils (SELECT=VRamViewer, L2+START=SaveScreen) were gated on
+    `__FILE_SYSTEM__==PC && !__USER_CDBUILD__`, i.e. compiled out of every
+    CD build.  Both outer conditions gained a `|| !defined(PSX_MIPS_ASM)`
+    arm so the Win32 port's DEBUG variant keeps them (the shim implements
+    the libsn `PC*` file calls SaveScreen needs - `port/psyq/sn/
+    pcfile.cpp`).  On the PlayStation build `PSX_MIPS_ASM` is defined, so
+    both conditions reduce to the originals - verified by the PSX
+    regression build.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal â†’ `char*` conversions (pervasive; `-Wno-write-strings`).

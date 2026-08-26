@@ -22,6 +22,7 @@ shift 2>/dev/null || true
 build_one()
 {
     preset="$1"
+    shift                       # the rest is extra ninja args, not the preset
     echo "=== configure+build: $preset ==="
     cmake --preset "$preset"
     cmake --build --preset "$preset" "$@"

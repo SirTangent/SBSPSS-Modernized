@@ -118,7 +118,7 @@ extern "C" DRAWENV *PutDrawEnv(DRAWENV *env)
 		the same decode the 0xE1 command uses, so the two cannot drift.  */
 	GPU_ApplyTexpage((uint32_t)env->tpage | ((uint32_t)(env->dtd & 1) << 9));
 	/* E2 */
-	g_gpu.texWindow = 0;
+	GPU_ApplyTexWindow(0);		/* PutDrawEnv resets the window to identity */
 	/* E3/E4 */
 	g_gpu.clipX0 = env->clip.x;
 	g_gpu.clipY0 = env->clip.y;

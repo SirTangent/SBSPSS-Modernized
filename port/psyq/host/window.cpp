@@ -27,6 +27,9 @@
 bool VkPresent_Init(SDL_Window *window);	/* port/psyq/vk/vk_present.cpp */
 void VkPresent_Frame(void);
 
+extern "C" void Port_InputHandleEvent(const void *ev);	/* host/input.cpp */
+extern "C" void Port_InputFrame(unsigned long vblank);
+
 static SDL_Window	*g_window;
 static int			g_videoUp;
 static int			g_vkUp;
@@ -118,7 +121,7 @@ extern "C" void Host_EnsureVideo(void)
 	parseTooling();
 
 	SDL_SetMainReady();
-	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD))
 	{
 		fprintf(stderr, "[host] SDL_Init failed: %s\n", SDL_GetError());
 		return;
@@ -163,8 +166,20 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 				fflush(stderr);
 				_exit(0);
 			}
+			if (ev.type == SDL_EVENT_GAMEPAD_ADDED ||
+				ev.type == SDL_EVENT_GAMEPAD_REMOVED)
+				Port_InputHandleEvent(&ev);
 		}
 	}
+
+	/*	Outside the video gate on purpose.  SBSP_PAD_SCRIPT needs no SDL at
+		all, and the degraded no-window mode this file promises (frame dumps
+		+ SBSP_EXIT_AFTER on a display-less machine or CI) is exactly where
+		scripted input is the ONLY way to navigate - gating it here left
+		such runs dumping the title screen forever, without even the
+		"[input] SBSP_PAD_SCRIPT: N entries" line to say why.  The keyboard
+		and gamepad readers already handle their absence.  */
+	Port_InputFrame(vblankNo);	/* rebuild the PS1 pad packet */
 
 	for (int i = 0; i < g_dumpCount; i++)
 	{
