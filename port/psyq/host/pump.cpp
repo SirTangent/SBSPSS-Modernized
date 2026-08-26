@@ -73,17 +73,49 @@ extern "C" double Port_NowSeconds(void)
 	return (double)(now.QuadPart - g_qpcOrigin.QuadPart) / (double)g_qpcFreq.QuadPart;
 }
 
+/*	Backlog cap.  Pending vblanks drain one per pump call, so the game
+	tolerates a short lag; past this the host is simply not keeping up (or
+	was stopped dead by a debugger / laptop sleep) and the WALL CLOCK is
+	rebased onto the counter - see Port_Pump.  ~133ms at 60Hz.  */
+#define MAX_PENDING_VBLANKS 8
+
 extern "C" void Port_Pump(void)
 {
 	extern void Host_VBlank(unsigned long vblankNo);	/* host/window.cpp */
 	extern void Port_RCnt2Vblank(int vblankHz);			/* api/libapi_stubs.cpp */
 
+	/*	Nested pumps are a complete no-op.  Port_Pump can be reached from
+		inside g_vsyncCallback (anything the game's vblank work touches that
+		pumps - DrawSync, PadGetState, VSync), and on PS1 that work ran in
+		the vblank IRQ handler, which could not observe its own next firing.
+		Re-entering here would double-advance FrameCounter/TickCount for one
+		real vblank and re-enter LoadingIcon mid-draw.  Skipping the whole
+		step (rather than just the callback) keeps the counter and the
+		callback in lockstep, so nothing is silently dropped: the pending
+		vblank is simply delivered by the next non-nested pump.
+		Requirement this places on vblank callbacks: they must not BLOCK on
+		the pump (a VSync(n) wait from inside one would never complete).
+		Nothing in the tree does - VidVSyncCallback only draws.  */
+	static int	inPump;
+	if (inPump)
+		return;
+
 	unsigned long target = wallVblank();
 
-	/*	after a long stall (debugger, laptop sleep) don't fire thousands of
-		catch-up callbacks - drop the missed vblanks and replay a few  */
-	if (target > g_vblank + 8)
-		g_vblank = target - 8;
+	/*	Backlog control.  The old code fast-forwarded g_vblank to
+		`target - 8`, which advanced the counter WITHOUT firing the
+		callbacks for the skipped vblanks: FrameCounter/TickCount
+		(source/system/vid.cpp) and the music tick lag wall time forever,
+		and every VSync(0) inside the backlog returns for free.  Rebase the
+		wall clock onto the counter instead - no callback is ever dropped,
+		and a host that cannot sustain 60Hz runs consistently slow rather
+		than tearing game time away from the music tempo.  */
+	if (target > g_vblank + MAX_PENDING_VBLANKS)
+	{
+		g_vblankBase = g_vblank + MAX_PENDING_VBLANKS;
+		QueryPerformanceCounter(&g_qpcBase);
+		target = g_vblankBase;
+	}
 
 	/*	AT MOST ONE vblank per pump call.  On PS1 the vblank is an interrupt:
 		game code waiting on its side effects always runs between two firings
@@ -97,11 +129,13 @@ extern "C" void Port_Pump(void)
 		per call through the many pump sites a game frame passes.  */
 	if (g_vblank < target)
 	{
+		inPump = 1;
 		g_vblank++;
 		if (g_vsyncCallback)
 			g_vsyncCallback();		/* game vblank work first (loading icon...) */
 		Port_RCnt2Vblank(g_hz);
 		Host_VBlank(g_vblank);		/* ...then events + present + tooling */
+		inPump = 0;
 	}
 }
 
@@ -124,7 +158,11 @@ extern "C" int VSync(int mode)
 
 	/*	mode 0: `until` is computed BEFORE any pumping, so one call consumes
 		exactly one vblank callback even when a pending vblank has already
-		accumulated - the StopLoad invariant (see Port_Pump).  */
+		accumulated - the StopLoad invariant (see Port_Pump).  While a
+		backlog exists this returns without a real wait, which is exactly
+		what catching up means: each return still delivered one callback, so
+		game time advanced by one frame.  Port_Pump bounds the backlog at
+		MAX_PENDING_VBLANKS, so free returns can never run away.  */
 	unsigned long until = (mode == 0) ? g_vblank + 1
 									  : g_lastVSyncVblank + (unsigned long)mode;
 	Port_Pump();
