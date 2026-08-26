@@ -138,6 +138,7 @@ if(TARGET SDL3::SDL3-static)
 else()
     target_link_libraries(psyq_shim PUBLIC SDL3::SDL3)
 endif()
+target_link_libraries(psyq_shim PUBLIC winmm)   # timeBeginPeriod (host/pump.cpp)
 
 # ---------------------------------------------------------------------------
 # The game itself (M2+): the real main() from source/system/main.cpp over the

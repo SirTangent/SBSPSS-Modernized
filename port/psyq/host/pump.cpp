@@ -8,6 +8,10 @@
 */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <timeapi.h>	/* timeBeginPeriod (link: winmm) */
+
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "pump.h"
 
@@ -33,6 +37,11 @@ static void clockInit(void)
 		QueryPerformanceFrequency(&g_qpcFreq);
 		QueryPerformanceCounter(&g_qpcBase);
 		g_qpcOrigin = g_qpcBase;
+		/*	Sleep(1) in Port_PumpIdle is the granularity of every VSync
+			wait; without this it can be ~15ms on Windows' default timer
+			resolution, overshooting whole vblanks.  Never matched with
+			timeEndPeriod - the process needs it for its entire life.  */
+		timeBeginPeriod(1);
 		g_clockInit = 1;
 	}
 }
@@ -78,6 +87,35 @@ extern "C" double Port_NowSeconds(void)
 	was stopped dead by a debugger / laptop sleep) and the WALL CLOCK is
 	rebased onto the counter - see Port_Pump.  ~133ms at 60Hz.  */
 #define MAX_PENDING_VBLANKS 8
+
+/*	SBSP_PACE_LOG=1: every 300 vblanks (5s at 60Hz), print delivered vblanks
+	vs VSync(0) waits over the window.  In steady state the game calls
+	VSync(0) exactly once per rendered frame (VidSwapDraw), so vbl/vsync0 ~=
+	getFramesSinceLast: 1.0 is locked full-rate, ~6 was the M3 frontend
+	before the present was decoupled from emulated time.  */
+static unsigned long	g_vsync0Count;
+
+static void paceLog(void)
+{
+	static int				enabled = -1;
+	static unsigned long	lastVsync0;
+	static double			lastWall;
+
+	if (enabled < 0)
+	{
+		const char *e = getenv("SBSP_PACE_LOG");
+		enabled = (e && *e && *e != '0');
+	}
+	if (!enabled || (g_vblank % 300) != 0)
+		return;
+
+	double now = Port_NowSeconds();
+	unsigned long dv = g_vsync0Count - lastVsync0;
+	fprintf(stderr, "[pace] vblank=%lu  vsync0=%lu in window (vbl/frame %.2f)  wall %.2fs for 300 vbl\n",
+			g_vblank, dv, dv ? 300.0 / (double)dv : 0.0, now - lastWall);
+	lastVsync0 = g_vsync0Count;
+	lastWall   = now;
+}
 
 extern "C" void Port_Pump(void)
 {
@@ -135,6 +173,7 @@ extern "C" void Port_Pump(void)
 			g_vsyncCallback();		/* game vblank work first (loading icon...) */
 		Port_RCnt2Vblank(g_hz);
 		Host_VBlank(g_vblank);		/* ...then events + present + tooling */
+		paceLog();
 		inPump = 0;
 	}
 }
@@ -165,6 +204,8 @@ extern "C" int VSync(int mode)
 		MAX_PENDING_VBLANKS, so free returns can never run away.  */
 	unsigned long until = (mode == 0) ? g_vblank + 1
 									  : g_lastVSyncVblank + (unsigned long)mode;
+	if (mode == 0)
+		g_vsync0Count++;	/* pace diagnostic - see paceLog */
 	Port_Pump();
 	while (g_vblank < until)
 		Port_PumpIdle();

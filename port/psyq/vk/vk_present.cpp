@@ -96,6 +96,7 @@
 	F(vkDestroySemaphore)													\
 	F(vkCreateFence)														\
 	F(vkWaitForFences)														\
+	F(vkGetFenceStatus)														\
 	F(vkResetFences)
 
 #define DECL(name) static PFN_##name p_##name;
@@ -793,18 +794,29 @@ void VkPresent_Frame(void)
 			return;
 	}
 
-	/*	Wait for this slot's previous frame before reusing its command and
-		staging buffers.  The fence is reset only once we are certain we will
-		submit - an abandoned frame must leave it signalled, or the next lap
-		round the ring waits forever.  */
+	/*	NEVER block emulated time on the display (M4).  This runs once per
+		delivered emulated vblank, and a game frame passes ~6 pump sites -
+		when each of those waited a real FIFO refresh here, one game frame
+		cost ~6 refreshes and the game ran at ~10fps (getFramesSinceLast~6).
+		So: if this slot's previous frame is still on the GPU, or the FIFO
+		swapchain has no image free yet, SKIP the present entirely - the
+		next vblank will show the newer VRAM anyway.  Present rate
+		self-limits to the display; the emulated vblank clock stays purely
+		QPC-paced.  (Frame dumps are unaffected - they read VRAM directly.)
+
+		The fence is reset only once we are certain we will submit - an
+		abandoned frame must leave it signalled, or the next lap round the
+		ring waits forever.  */
 	uint32_t slot = s_frame % FRAMES_IN_FLIGHT;
-	if (p_vkWaitForFences(s_dev, 1, &s_fence[slot], VK_TRUE, ~0ull) != VK_SUCCESS)
-		return;
+	if (p_vkGetFenceStatus(s_dev, s_fence[slot]) != VK_SUCCESS)
+		return;		/* slot busy on the GPU - skip, don't stall */
 
 	uint32_t imgIdx = 0;
-	VkResult r = p_vkAcquireNextImageKHR(s_dev, s_swapchain, 100000000ull,
+	VkResult r = p_vkAcquireNextImageKHR(s_dev, s_swapchain, 0,
 										 s_semAcquire[slot], VK_NULL_HANDLE, &imgIdx);
 	int recreateAfter = 0;
+	if (r == VK_NOT_READY || r == VK_TIMEOUT)
+		return;		/* no image free this instant - skip (semaphore unsignalled) */
 	if (r == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		createSwapchain();
