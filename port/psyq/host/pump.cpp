@@ -85,7 +85,17 @@ extern "C" void Port_Pump(void)
 	if (target > g_vblank + 8)
 		g_vblank = target - 8;
 
-	while (g_vblank < target)
+	/*	AT MOST ONE vblank per pump call.  On PS1 the vblank is an interrupt:
+		game code waiting on its side effects always runs between two firings
+		and can observe every intermediate state.  StopLoad (vid.cpp:125)
+		depends on that - it spins `while(LoadTime) VSync(0)` and LoadTime
+		WRAPS to zero, so if one wait iteration ever fires two callbacks the
+		zero can be stepped over forever (seen live: the FIFO present paces
+		the loop at ~1 real vsync, one pending vblank accumulates per
+		iteration, and a catch-up burst here made every VSync(0) fire twice).
+		The counter still tracks the wall clock - pending vblanks drain one
+		per call through the many pump sites a game frame passes.  */
+	if (g_vblank < target)
 	{
 		g_vblank++;
 		if (g_vsyncCallback)
@@ -106,12 +116,18 @@ extern "C" void Port_PumpIdle(void)
 
 extern "C" int VSync(int mode)
 {
-	Port_Pump();
 	if (mode < 0)
+	{
+		Port_Pump();
 		return (int)g_vblank;
+	}
 
+	/*	mode 0: `until` is computed BEFORE any pumping, so one call consumes
+		exactly one vblank callback even when a pending vblank has already
+		accumulated - the StopLoad invariant (see Port_Pump).  */
 	unsigned long until = (mode == 0) ? g_vblank + 1
 									  : g_lastVSyncVblank + (unsigned long)mode;
+	Port_Pump();
 	while (g_vblank < until)
 		Port_PumpIdle();
 	g_lastVSyncVblank = g_vblank;
