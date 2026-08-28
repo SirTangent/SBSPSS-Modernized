@@ -76,6 +76,7 @@ All optional, all read once at startup.
 | `SBSP_DUMP_FRAMES` | Comma-separated vblank numbers; writes the **displayed** VRAM region as a 24-bit BMP at each. Max 16. |
 | `SBSP_DUMP_DIR` | Where those BMPs go (default `.`). Files are `sbsp_frame_<vblank>.bmp`. |
 | `SBSP_EXIT_AFTER` | Clean `exit(0)` at that vblank. The game's `MainLoop` has no exit path of its own, so scripted runs need this. |
+| `SBSP_PRIM_LOG` | Print the prim-pool high-water mark each time it rises (§6). Use it to measure headroom against `MAX_PRIMS` after any change that adds primitives per frame. |
 | `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). |
 
 The frame dumps read emulated VRAM directly, so they work **even if Vulkan
@@ -146,6 +147,13 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
 - `[gte] ...`, `[input] gamepad connected: ...`,
   `[input] SBSP_PAD_SCRIPT: N entries`, `[host] wrote ....bmp`,
   `[args] boot level: ...`, `[cd] XA stream chan N: end-of-stream ...`.
+- `[gpu] prim pool high-water N/M bytes` (with `SBSP_PRIM_LOG=1`) - the
+  peak bytes used in one prim buffer, sampled in `DrawOTag`, i.e. at the
+  exact peak of a frame's fill. **A `[gpu] WARNING: prim pool ...` line
+  prints in BOTH variants** once usage passes 87.5%: the game's own
+  overflow check (`prim.cpp`'s `ASSERT(!"PRIM OVERFLOW")`) is post-hoc and
+  compiles away in FINAL, so without this a pool overrun would silently
+  corrupt the heap in the shipping build. Measured peaks are in §10.
 - `--pace-log` (or `SBSP_PACE_LOG=1`): every 300 vblanks, `[pace]` prints
   delivered vblanks vs `VSync(0)` waits - `vbl/frame 1.00` is locked
   full-rate; the M3 frontend read ~6 before the present was decoupled from
@@ -197,7 +205,39 @@ at all), `Port_Pump`, `DoAssert`, `GPU_DrawPrim`. Set the environment before
 launching, or use `set environment SBSP_EXIT_AFTER 1300` inside gdb.
 
 
-## 9. Gotcha worth memorising
+## 9. Measured budgets (M4 sweep)
+
+Baselines to compare against after any change that adds primitives or grows
+a render window. Re-measure with:
+
+```powershell
+$env:SBSP_PRIM_LOG = "1"
+port\build\debug\sbsp.exe --level 1-1 --no-cd-pace --pad-script "240:2000,600:0000" --exit-after 600
+```
+
+**Prim pool** - the budget is `MAX_PRIMS * MAX_PRIM_SIZE` = **81,920 bytes
+per buffer** (`source/gfx/prim.h`). It is a *byte* budget, not a primitive
+count, so mixed primitive sizes matter. Sweeping all 25 bootable levels
+(600 vblanks each, walking right):
+
+| | level | peak | of budget |
+|---|---|---|---|
+| worst | Chapter 4 Level 3 (`--level 4-3`) | 52,308 B | 63.9% |
+| next | Chapter 5 bonus (`--level 6-5`) | 50,392 B | 61.5% |
+| next | Chapter 1 bonus (`--level 6-1`) | 48,600 B | 59.3% |
+| typical | most levels | 26-38 KB | 32-46% |
+| lightest | Chapter 4 Level 1 | 17,380 B | 21.2% |
+
+So the widened PC tile window (conv_pc.md #18) leaves **~36% headroom at
+the worst level** and `MAX_PRIMS` does not need raising. The 87.5% warning
+never fired. Kelp World (bonus) levels are the dense ones, as expected -
+they are the vehicle levels.
+
+**Scratchpad**: C1L1 peaks at 240 B; the worst in the tree is 996 B
+(`CHAPTER06_LEVEL01`) against the 1 KB `PORT_Scratchpad`.
+
+
+## 10. Gotcha worth memorising
 
 **A vblank callback must never block on the pump.** A nested `Port_Pump` is a
 complete no-op (that is what keeps the vblank counter and its callback in
