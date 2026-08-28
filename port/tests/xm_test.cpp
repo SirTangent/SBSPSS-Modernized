@@ -169,7 +169,11 @@ int main()
 	uint8_t *xm1 = loadFile("data/Music/chapter1/CHAPTER1.XM", &xmSize);
 	uint8_t *pxmSfx = loadFile("data/Sfx/ingame/ingame.PXM", &pxmSize);
 	uint8_t *xmSfx = loadFile("data/Sfx/ingame/ingame.xm", &xmSize);
-	if (!pxm || !xm || !vh || !vb || !pxm1 || !xm1 || !pxmSfx || !xmSfx)
+	long vhSfxSize, vbSfxSize;
+	uint8_t *vhSfx = loadFile("data/Sfx/ingame/ingame.VH", &vhSfxSize);
+	uint8_t *vbSfx = loadFile("data/Sfx/ingame/ingame.VB", &vbSfxSize);
+	if (!pxm || !xm || !vh || !vb || !pxm1 || !xm1 || !pxmSfx || !xmSfx ||
+		!vhSfx || !vbSfx)
 	{
 		std::printf("xm test SKIPPED (data/Music + data/Sfx assets not found"
 					" - run from the repo root)\n");
@@ -251,6 +255,119 @@ int main()
 		XM_CloseVAB(0);
 
 		check(XM_VABInit(pxm, vb) == -1, "non-VAB data is rejected");
+	}
+
+	/* --- sequencer end-to-end: the title theme actually plays -------------- */
+	{
+		XM_OnceOffInit(XM_NTSC);				/* clean re-init */
+		XM_SetStereo();
+		for (int i = 0; i < 24; i++)
+			XM_SetSongAddress(songStore[i]);
+		XM_SetFileHeaderAddress(hdr0);
+		XM_SetFileHeaderAddress(hdr1);
+		check(InitXMData(pxm, 0, XM_UseXMPanning) == 0, "seq: sb-title mod");
+		check(InitXMData(pxmSfx, 1, XM_UseXMPanning) == 1, "seq: sfx mod");
+		SpuInit();
+		static char table[SPU_MALLOC_RECSIZ * 201];
+		SpuInitMalloc(200, table);
+		SpuSetCommonMasterVolume(0x3FFF, 0x3FFF);
+		int vabMusic = XM_VABInit(vh, vb);
+		int vabSfx = XM_VABInit(vhSfx, vbSfx);
+		check(vabMusic == 0 && vabSfx == 1, "seq: both VABs resident");
+
+		/*	title music: XM_Music, start position 0, all channels from 0
+			(exactly playSong()'s call shape)  */
+		int id = XM_Init(vabMusic, 0, -1, 0, XM_Loop, -1, XM_Music, 0);
+		check(id >= 0 && id <= 23, "XM_Init returns a song id 0..23");
+		XM_SetMasterVol(id, 127);
+
+		static int16_t frame[735 * 2];
+		XM_Feedback fb;
+
+		/* looping song: feedback stays "processing" forever */
+		long long sumL = 0, sumR = 0;
+		int peak = 0;
+		for (int u = 0; u < 360; u++)			/* six seconds */
+		{
+			XM_Update();
+			Spu_RenderFrames(frame, 735);
+			for (int i = 0; i < 735; i++)
+			{
+				int l = frame[i * 2], r = frame[i * 2 + 1];
+				sumL += l < 0 ? -l : l;
+				sumR += r < 0 ? -r : r;
+				if (l > peak)
+					peak = l;
+			}
+		}
+		check(XM_GetFeedback(id, &fb) == XM_PROCESSING,
+			  "looping song reports still-playing");
+		check(fb.Status == XM_PLAYING && fb.ActiveVoices > 0,
+			  "feedback: playing with active voices");
+		check(peak > 2000, "title theme renders real signal");
+		check(sumL > 0 && sumR > 0, "both stereo sides carry signal");
+
+		/*	row cadence sanity: the title theme swings (alternating F03/F04
+			speed commands), so only a bounded average holds here - the
+			EXACT tick math is pinned by the constant-tempo one-shot SFX
+			check below (finishes within +/-2 vblanks of rows*speed*6/5).  */
+		XM_GetFeedback(id, &fb);
+		int lastRow = fb.PatternPos, advances = 0, updates = 0;
+		while (advances < 20 && updates < 400)
+		{
+			XM_Update();
+			Spu_RenderFrames(frame, 735);
+			updates++;
+			XM_GetFeedback(id, &fb);
+			if (fb.PatternPos != lastRow)
+			{
+				lastRow = fb.PatternPos;
+				advances++;
+			}
+		}
+		check(advances == 20, "row counter advances");
+		check(updates >= 20 * 2 && updates <= 20 * 10,
+			  "average row duration within a sane tempo band");
+
+		/* stop drains to silence well inside the game's 5-frame window */
+		XM_PlayStop(id);
+		check(XM_GetFeedback(id, &fb) == XM_NOT_PROCESSED,
+			  "stopped song reports finished");
+		Spu_RenderFrames(frame, 735);
+		Spu_RenderFrames(frame, 735);
+		Spu_RenderFrames(frame, 735);
+		bool silent = true;
+		for (int i = 0; i < 735 * 2; i++)
+			silent = silent && frame[i] == 0;
+		check(silent, "silent within three vblanks of XM_PlayStop");
+		XM_Quit(id);
+
+		/*	one-shot SFX on channel 10, single channel - playSfx()'s shape.
+			Feedback must flip to finished exactly when its pattern ends,
+			freeing the game's channel bookkeeping.  */
+		const XmModule *ms = g_xmHeaderSlot[1];
+		int sfxPat = 0;
+		int sfxId = XM_Init(vabSfx, 1, -1, 10, XM_NoLoop, 1, XM_SFX, sfxPat);
+		check(sfxId >= 0, "SFX XM_Init");
+		check(XM_GetFeedback(sfxId, &fb) == XM_PROCESSING,
+			  "one-shot SFX starts as still-playing");
+		int rows = ms->pat[sfxPat].rows;
+		int expect = (rows * 6 * 6 + 4) / 5;	/* rows*6 ticks at 5/6 per vbl */
+		int u = 0;
+		while (XM_GetFeedback(sfxId, &fb) == XM_PROCESSING && u < expect + 20)
+		{
+			XM_Update();
+			Spu_RenderFrames(frame, 735);
+			u++;
+		}
+		check(u >= expect - 2 && u <= expect + 2,
+			  "one-shot SFX finishes exactly at pattern end");
+		if (!(u >= expect - 2 && u <= expect + 2))
+			std::printf("  (SFX: %d rows, finished after %d updates, expected"
+						" ~%d)\n", rows, u, expect);
+		XM_Quit(sfxId);
+		XM_CloseVAB(vabSfx);
+		XM_CloseVAB(vabMusic);
 	}
 
 	if (g_failures)
