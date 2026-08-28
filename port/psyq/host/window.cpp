@@ -121,6 +121,14 @@ extern "C" void Host_EnsureVideo(void)
 	parseTooling();
 
 	SDL_SetMainReady();
+
+	/*	audio joins the lazy bring-up here, ahead of the video guards below:
+		it needs no window and no video subsystem, and --dump-audio has to
+		work on a host with no display at all.  (Not from SpuInit: the unit
+		tests drive SpuInit directly and must never open a device.)  */
+	extern void Host_EnsureAudio(void);
+	Host_EnsureAudio();
+
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD))
 	{
 		fprintf(stderr, "[host] SDL_Init failed: %s\n", SDL_GetError());
@@ -140,11 +148,6 @@ extern "C" void Host_EnsureVideo(void)
 	if (!g_vkUp)
 		fprintf(stderr, "[host] Vulkan presenter unavailable - window will stay "
 						"black (frame dumps still work)\n");
-
-	/*	audio joins the lazy video bring-up (NOT SpuInit: the unit tests
-		drive SpuInit directly and must never open a device)  */
-	extern void Host_EnsureAudio(void);
-	Host_EnsureAudio();
 }
 
 /*****************************************************************************/

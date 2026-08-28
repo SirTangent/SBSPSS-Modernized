@@ -266,6 +266,12 @@ void SpuSetVoiceAttr(SpuVoiceAttr *arg)
 
 void SpuSetVoiceVolume(int vNum, short volL, short volR)
 {
+	static int badVoice;
+	if (vNum < 0 || vNum >= SPU_NVOICES)
+	{
+		logOnce(&badVoice, "SpuSetVoiceVolume/Pitch: voice out of range");
+		return;
+	}
 	Spu_Lock();
 	g_spuVoice[vNum].volL = volL;
 	g_spuVoice[vNum].volR = volR;
@@ -274,6 +280,12 @@ void SpuSetVoiceVolume(int vNum, short volL, short volR)
 
 void SpuSetVoicePitch(int vNum, unsigned short pitch)
 {
+	static int badVoice;
+	if (vNum < 0 || vNum >= SPU_NVOICES)
+	{
+		logOnce(&badVoice, "SpuSetVoiceVolume/Pitch: voice out of range");
+		return;
+	}
 	Spu_Lock();
 	g_spuVoice[vNum].pitch = pitch;
 	Spu_Unlock();

@@ -58,6 +58,11 @@ extern "C" {
 void XM_OnceOffInit(int PAL)
 {
 	g_xmTickHz = (PAL == XM_PAL) ? 50 : 60;
+	/*	give the SPU RAM back before dropping the slots - clearing inUse
+		alone would orphan every allocation for the life of the process  */
+	for (int i = 0; i < XM_MAX_VABS; i++)
+		if (g_xmVab[i].inUse)
+			XM_CloseVAB(i);
 	memset(g_xmVab, 0, sizeof(g_xmVab));
 	g_xmHeaderCount = 0;
 	g_xmSongCount = 0;
@@ -146,9 +151,12 @@ int InitXMData(u_char *mpp, int XM_ID, int S3MPan)
 	m->defBPM = rd16(base + 0x4E);
 	m->orderTable = base + 0x50;
 
-	if (m->numPatterns > XM_MAX_PATTERNS || m->numInstruments > XM_MAX_INSTRUMENTS)
+	/*	a module with no patterns or an empty order table has nothing to
+		play, and every "last valid index" downstream would be -1  */
+	if (m->numPatterns > XM_MAX_PATTERNS || m->numInstruments > XM_MAX_INSTRUMENTS ||
+		m->numPatterns < 1 || m->songLength < 1)
 	{
-		xmLogOnce(&tooMany, "InitXMData: pattern/instrument count over cap");
+		xmLogOnce(&tooMany, "InitXMData: pattern/instrument count out of range");
 		m->inUse = 0;
 		return -1;
 	}

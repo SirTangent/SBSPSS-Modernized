@@ -89,6 +89,7 @@ struct XmChannelState
 	uint8_t		rowVolCol;		/* this row's volume-column byte */
 
 	int			volEnvPos, panEnvPos;
+	int			autoVibPos, autoVibSweep;	/* instrument vibrato, own clock */
 	int			fadeout;		/* 65536 down to 0 */
 	uint8_t		keyOff;
 	uint8_t		active;			/* channel has a sounding sample */
@@ -119,8 +120,6 @@ struct XmSongState
 	int				patDelay;
 	int				pendingBreakRow;	/* -1 = none */
 	int				pendingJumpPos;		/* -1 = none */
-	int				playNext;			/* XM_PlayNext request, -1 = none */
-	int				cPlayNext;			/* XM_CPlayNext request, -1 = none */
 
 	int				status;			/* XM_STOPPED / XM_PLAYING / XM_PAUSED */
 	int				finished;		/* nonzero once a NoLoop song/SFX ends */

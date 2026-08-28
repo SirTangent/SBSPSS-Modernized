@@ -128,25 +128,45 @@ const uint8_t *readSlot(const uint8_t *p, RowSlot *s)
 	return p;
 }
 
-/*	fetch row `row` of a sparse pattern into slots[chans]  */
+/*	step over one packed slot without decoding it (row skipping)  */
+const uint8_t *skipSlot(const uint8_t *p)
+{
+	uint8_t b = *p++;
+	if (b & 0x80)
+	{
+		if (b & 0x01) p++;
+		if (b & 0x02) p++;
+		if (b & 0x04) p++;
+		if (b & 0x08) p++;
+		if (b & 0x10) p++;
+	}
+	else
+		p += 4;
+	return p;
+}
+
+/*	fetch row `row` of a sparse pattern into slots[chans].  packedSize
+	bounds every scan: a truncated or mis-parsed PXM must stop at the end
+	of the pattern rather than hunt for a 0xFF past the module buffer.  */
 void fetchRow(const XmPatternRef *pat, int row, int chans, RowSlot *slots)
 {
 	memset(slots, 0, sizeof(RowSlot) * (size_t)chans);
 	if (!pat->data || pat->packedSize == 0)
 		return;
 	const uint8_t *p = pat->data;
+	const uint8_t *end = pat->data + pat->packedSize;
 	for (int r = 0; r < row; r++)
 	{
-		while (*p != 0xFF)
+		while (p < end && *p != 0xFF)
 		{
-			RowSlot skip;
-			memset(&skip, 0, sizeof(skip));
 			p++;
-			p = readSlot(p, &skip);
+			p = skipSlot(p);
 		}
+		if (p >= end)
+			return;
 		p++;
 	}
-	while (*p != 0xFF)
+	while (p < end && *p != 0xFF)
 	{
 		int c = *p++;
 		RowSlot tmp;
@@ -186,14 +206,17 @@ int instrView(const XmModule *mod, int instr1, InstrView *iv)
 	iv->keymap = h + 33;
 	iv->volEnv = h + 129;
 	iv->panEnv = h + 177;
-	iv->numVolPts = h[225];
-	iv->numPanPts = h[226];
-	iv->volSus = h[227];
-	iv->volLoopStart = h[228];
-	iv->volLoopEnd = h[229];
-	iv->panSus = h[230];
-	iv->panLoopStart = h[231];
-	iv->panLoopEnd = h[232];
+	/*	both envelopes are 12 (x,y) u16 pairs; FT2 caps every count and
+		point index at that, and a malformed header must not index past
+		the 48 bytes that actually exist  */
+	iv->numVolPts = clampi(h[225], 0, 12);
+	iv->numPanPts = clampi(h[226], 0, 12);
+	iv->volSus = clampi(h[227], 0, 11);
+	iv->volLoopStart = clampi(h[228], 0, 11);
+	iv->volLoopEnd = clampi(h[229], 0, 11);
+	iv->panSus = clampi(h[230], 0, 11);
+	iv->panLoopStart = clampi(h[231], 0, 11);
+	iv->panLoopEnd = clampi(h[232], 0, 11);
 	iv->volType = h[233];
 	iv->panType = h[234];
 	iv->vibType = h[235];
@@ -292,7 +315,12 @@ void silenceChannel(XmSongState *s, int ch, int hardCut)
 	if (c.spuKeyed)
 	{
 		if (hardCut)
+		{
 			SpuSetVoiceVolume(voice, 0, 0);
+			/*	the write-through cache has to follow the register, or the
+				next note that computes this same volume is never written  */
+			c.spuVolL = c.spuVolR = 0;
+		}
 		SpuSetKey(SPU_OFF, SPU_VOICECH(voice));
 		c.spuKeyed = 0;
 	}
@@ -315,7 +343,7 @@ void endSong(XmSongState *s)
 
 /* ---- note trigger (tick 0) ----------------------------------------------- */
 
-void triggerNote(XmSongState *s, int ch, int note, int keepPosition)
+void triggerNote(XmSongState *s, int ch, int note)
 {
 	XmChannelState &c = s->ch[ch];
 	const XmModule *mod = s->mod;
@@ -341,24 +369,40 @@ void triggerNote(XmSongState *s, int ch, int note, int keepPosition)
 	c.period = c.basePeriod;
 	c.vagIndex = mod->ins[c.instr - 1].vagBase + sIdx;
 
-	if (!keepPosition)
+	/*	the module's positional VAG count can outrun the bank's size table;
+		reject the note rather than wrap onto an unrelated sample  */
+	const XmVab &vab = g_xmVab[s->vabId];
+	if (c.vagIndex < 1 || c.vagIndex >= XM_MAX_VAGS ||
+		c.vagIndex > vab.numVags)
 	{
-		const XmVab &vab = g_xmVab[s->vabId];
-		uint32_t addr = vab.vagAddr[c.vagIndex & (XM_MAX_VAGS - 1)];
-		/*	9xx sample offset: units of 256 samples; ADPCM only seeks in
-			28-sample/16-byte blocks, so round to the nearest block  */
-		if (c.memSampleOfs)
-		{
-			uint32_t sampleOfs = (uint32_t)c.memSampleOfs << 8;
-			addr += (sampleOfs / 28u) * 16u;
-		}
-		if (!(c.vibWave & 4))
-			c.vibPos = 0;
-		if (!(c.tremWave & 4))
-			c.tremPos = 0;
-		programVoiceStart(s, ch, addr);
-		c.active = 1;
+		silenceChannel(s, ch, 1);
+		return;
 	}
+
+	uint32_t addr = vab.vagAddr[c.vagIndex];
+	/*	9xx sample offset: units of 256 samples, and only for a note on the
+		row that carries the effect.  ADPCM seeks in 28-sample/16-byte
+		blocks, so round down to a block and stay inside this VAG.  */
+	if (c.effect == 0x09 && c.memSampleOfs)
+	{
+		uint32_t byteOfs = (((uint32_t)c.memSampleOfs << 8) / 28u) * 16u;
+		if (byteOfs < vab.vagBytes[c.vagIndex])
+			addr += byteOfs;
+	}
+	if (!(c.vibWave & 4))
+		c.vibPos = 0;
+	if (!(c.tremWave & 4))
+		c.tremPos = 0;
+	/*	the note - not the instrument column - restarts the envelopes,
+		fadeout and key-off state (FT2)  */
+	c.volEnvPos = 0;
+	c.panEnvPos = 0;
+	c.autoVibPos = 0;
+	c.autoVibSweep = 0;
+	c.fadeout = 65536;
+	c.keyOff = 0;
+	programVoiceStart(s, ch, addr);
+	c.active = 1;
 }
 
 void resetInstrument(XmSongState *s, int ch)
@@ -367,7 +411,7 @@ void resetInstrument(XmSongState *s, int ch)
 	InstrView iv;
 	if (!instrView(s->mod, c.instr, &iv))
 		return;
-	/* instrument column resets volume/pan/envelopes (FT2) */
+	/* instrument column resets volume/pan (FT2); envelopes belong to the note */
 	int sIdx = iv.keymap[clampi(c.note ? c.note - 1 : 0, 0, 95)];
 	const uint8_t *sh = sampleHdr(s->mod, c.instr, sIdx);
 	if (sh)
@@ -375,10 +419,6 @@ void resetInstrument(XmSongState *s, int ch)
 		c.volume = clampi(sh[12], 0, 64);
 		c.pan = sh[15];
 	}
-	c.volEnvPos = 0;
-	c.panEnvPos = 0;
-	c.fadeout = 65536;
-	c.keyOff = 0;
 }
 
 /* ---- row processing (tick 0) --------------------------------------------- */
@@ -403,8 +443,7 @@ void processSlotTick0(XmSongState *s, int ch, const RowSlot *sl)
 	c.param = sl->present ? sl->param : 0;
 	if (!sl->present)
 	{
-		if (c.effect == 0)
-			c.period = c.basePeriod;
+		c.period = c.basePeriod;		/* empty slot: drop any vibrato offset */
 		return;
 	}
 
@@ -416,6 +455,12 @@ void processSlotTick0(XmSongState *s, int ch, const RowSlot *sl)
 
 	if (sl->instr)
 		c.instr = sl->instr;
+
+	/*	9xx: xx is remembered per channel, but triggerNote applies it only
+		while this row's effect IS 0x09 - so it has to land before the
+		note below, and a later row without 9xx starts at zero again  */
+	if (c.effect == 0x09 && c.param)
+		c.memSampleOfs = c.param;
 
 	if (delayTicks)
 	{
@@ -447,7 +492,7 @@ void processSlotTick0(XmSongState *s, int ch, const RowSlot *sl)
 		}
 		else
 		{
-			triggerNote(s, ch, note, 0);
+			triggerNote(s, ch, note);
 		}
 	}
 
@@ -500,8 +545,7 @@ void processSlotTick0(XmSongState *s, int ch, const RowSlot *sl)
 	case 0x08:
 		c.pan = p;
 		break;
-	case 0x09:
-		if (p) c.memSampleOfs = p;
+	case 0x09:									/* sample offset: taken above */
 		break;
 	case 0x0B:
 		s->pendingJumpPos = p;
@@ -580,6 +624,10 @@ void processSlotTick0(XmSongState *s, int ch, const RowSlot *sl)
 		else
 			s->bpm = p;
 		break;
+	case 0x14:									/* Kxx key off: K00 is now */
+		if (p == 0)
+			doKeyOff(s, ch);
+		break;
 	case 0x19:									/* Pxy pan slide: per-tick */
 		if (p) c.memPanSlide = p;
 		break;
@@ -642,7 +690,7 @@ void processTickN(XmSongState *s, int ch, int tick)
 			doKeyOff(s, ch);
 		else if (note >= 1 && note <= 96 && c.instr)
 		{
-			triggerNote(s, ch, note, 0);
+			triggerNote(s, ch, note);
 			resetInstrument(s, ch);
 		}
 	}
@@ -705,7 +753,7 @@ void processTickN(XmSongState *s, int ch, int tick)
 			{
 				c.retrigTick = 0;
 				if (c.note >= 1 && c.note <= 96)
-					triggerNote(s, ch, c.note, 0);
+					triggerNote(s, ch, c.note);
 			}
 		}
 		else if ((p >> 4) == 0x0C && tick == (p & 0x0F))
@@ -743,7 +791,7 @@ void processTickN(XmSongState *s, int ch, int tick)
 			else vol += addTab[sel];
 			c.volume = (int16_t)clampi(vol, 0, 64);
 			if (c.note >= 1 && c.note <= 96)
-				triggerNote(s, ch, c.note, 0);
+				triggerNote(s, ch, c.note);
 		}
 		break;
 	}
@@ -845,15 +893,20 @@ void updateChannelOutput(XmSongState *s, int ch)
 		pan = clampi(pan + (envPan - 32) * reach / 32, 0, 255);
 	}
 
-	/* autovibrato */
+	/*	autovibrato: its own position and sweep counter, ticking whether or
+		not the instrument has a volume envelope and whether or not that
+		envelope is held at its sustain point  */
 	int period = c.period;
 	if (haveIv && iv.vibDepth)
 	{
-		int apos = (c.volEnvPos * iv.vibRate) >> 2;
 		int depth = iv.vibDepth;
-		if (iv.vibSweep && c.volEnvPos < iv.vibSweep)
-			depth = depth * c.volEnvPos / iv.vibSweep;
-		period += (waveValue(iv.vibType, apos & 63) * depth) >> 6;
+		if (iv.vibSweep && c.autoVibSweep < iv.vibSweep)
+		{
+			depth = depth * c.autoVibSweep / iv.vibSweep;
+			c.autoVibSweep++;
+		}
+		period += (waveValue(iv.vibType, (c.autoVibPos >> 2) & 63) * depth) >> 6;
+		c.autoVibPos += iv.vibRate;
 	}
 
 	/* tremolo */
@@ -1012,9 +1065,10 @@ int XM_Init(int VabID, int XM_ID, int SongID, int FirstCh,
 	static int badArgs, noSlot;
 	if (VabID < 0 || VabID >= XM_MAX_VABS || !g_xmVab[VabID].inUse ||
 		XM_ID < 0 || XM_ID >= g_xmHeaderCount ||
-		!g_xmHeaderSlot[XM_ID] || !g_xmHeaderSlot[XM_ID]->inUse)
+		!g_xmHeaderSlot[XM_ID] || !g_xmHeaderSlot[XM_ID]->inUse ||
+		FirstCh < 0 || FirstCh >= SPU_NVOICES)
 	{
-		seqLogOnce(&badArgs, "XM_Init: bad VabID/XM_ID");
+		seqLogOnce(&badArgs, "XM_Init: bad VabID/XM_ID/FirstCh");
 		return -1;
 	}
 
@@ -1057,8 +1111,6 @@ int XM_Init(int VabID, int XM_ID, int SongID, int FirstCh,
 	s->masterPan = 0;
 	s->pendingJumpPos = -1;
 	s->pendingBreakRow = -1;
-	s->playNext = -1;
-	s->cPlayNext = -1;
 
 	if (PlayType == XM_SFX)
 		s->sfxPattern = clampi(SFXNum, 0, mod->numPatterns - 1);
@@ -1114,7 +1166,7 @@ int XM_GetFeedback(int Song_ID, XM_Feedback *Feedback)
 			Feedback->SongBPM = (u_short)s->bpm;
 			Feedback->SongLength = (u_short)s->mod->songLength;
 			Feedback->SongLoop = s->loop;
-			Feedback->PlayNext = (short)s->playNext;
+			Feedback->PlayNext = -1;	/* XM_PlayNext is not implemented */
 			int voices = 0;
 			for (int ch = 0; ch < s->numCh; ch++)
 				if ((s->playMask & (1 << ch)) && s->ch[ch].active)
