@@ -15,6 +15,7 @@
 	callback-time work (loading icon, XM_Update in later milestones) still
 	happens "during" loads.
 */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,6 +58,18 @@ static int		g_inited;
 static long		g_curLBA;
 static double	g_readDeadline;	/* CD pacing: when the in-flight read "completes" */
 static int		g_pace = -1;	/* -1 unparsed; SBSP_CD_PACE=0 disables */
+
+/*	XA streaming (M4 degree: end-immediately).  Real sector delivery is M6;
+	until then an armed CdlReadS answers with ONE fabricated terminator
+	header so CXAStream reaches XA_MODE_END instead of pinning
+	isSpeechPlaying() true forever (which wedges GameOverScene's
+	speech-before-exit state and permanently ducks the mixer).
+	XACDReadyCallback (cdxa.cpp:53-91) ends the stream on CdlDataReady when
+	sector word 3 carries ID 352 ("video terminator") and the filter's
+	channel in bits 10-14 of the high halfword.  */
+static int		g_xaFilterChan = -1;	/* last CdlSetfilter chan (param[1]) */
+static int		g_xaEndIn;				/* vblanks until the terminator fires */
+static int		g_xaServeTerminator;	/* CdGetSector serves the header now */
 
 static void dataPath(char *dst, size_t dstSize, const char *name)
 {
@@ -204,6 +217,15 @@ extern "C" int CdControlB(u_char com, u_char *param, u_char *result)
 	case CdlMute:
 	case CdlDemute:
 		return 1;
+	case CdlSetfilter:
+		g_xaFilterChan = param ? param[1] : -1;	/* CdlFILTER.chan */
+		return 1;
+	case CdlReadS:
+		/*	XA streaming read - arm the end-immediately terminator (see the
+			g_xa* block above).  2 vblanks lets ControlXA finish its own
+			START->PLAY transition before the callback ends the stream.  */
+		g_xaEndIn = 2;
+		return 1;
 	default:
 		PSYQ_STUB_ONCE();
 		return 1;
@@ -300,9 +322,14 @@ extern "C" int CdSync(int mode, u_char *result)
 
 extern "C" int CdGetSector(void *madr, int size)
 {
-	(void)madr;
-	(void)size;
-	PSYQ_STUB_ONCE();
+	/*	Real XA/FMV sector payloads are M6/M7.  The one thing served today is
+		the armed terminator header: word 3 = (chan<<10)<<16 | 352, exactly
+		what XACDReadyCallback's end test reads (cdxa.cpp:71-89).  */
+	uint32_t *w = (uint32_t *)madr;
+	for (int i = 0; i < size; i++)
+		w[i] = 0;
+	if (g_xaServeTerminator && size >= 4)
+		w[3] = ((uint32_t)(g_xaFilterChan & 31) << 26) | 352u;
 	return 1;
 }
 
@@ -321,10 +348,36 @@ extern "C" int CdSetDebug(int level)
 
 /*	Callback registration is kept, not dropped: CXAStream::XACDReadyCallback
 	(cdxa.cpp:150) is the only writer of XA_MODE_END, so losing it would pin
-	isSpeechPlaying() true forever.  Nothing fires these until the XA/FMV
-	streaming milestones (M6/M7) route sector delivery through the pump.  */
+	isSpeechPlaying() true forever.  Until M6 routes real sector delivery
+	through the pump, the only firing is Port_CdVblank's one-shot terminator
+	(below); CdReadCallback stays registration-only (M7).  */
 static CdlCB g_readCallback;
 static CdlCB g_readyCallback;
+
+/*	Once per emulated vblank, from Port_Pump.  Counts down an armed CdlReadS
+	and delivers the fabricated end-of-stream sector: one CdlDataReady with
+	the terminator header staged for CdGetSector.  */
+extern "C" void Port_CdVblank(void)
+{
+	static u_char	result[8];
+
+	/*	The countdown only runs while there is someone to deliver to.
+		CFmvScene clears the ready callback at both ends of a movie
+		(source/fmv/fmv.cpp:186,267), and consuming the arming into a NULL
+		callback would drop this stream's terminator for good: cdxa.cpp is
+		the only writer of XA_MODE_END, so isSpeechPlaying() would stick
+		true forever - the exact wedge this delivery exists to prevent.  */
+	if (!g_readyCallback || g_xaEndIn <= 0)
+		return;
+	if (--g_xaEndIn != 0)
+		return;
+
+	fprintf(stderr, "[cd] XA stream chan %d: end-of-stream delivered (audio is M6)\n",
+			g_xaFilterChan);
+	g_xaServeTerminator = 1;
+	g_readyCallback(CdlDataReady, result);
+	g_xaServeTerminator = 0;
+}
 
 extern "C" CdlCB CdReadCallback(CdlCB func)
 {

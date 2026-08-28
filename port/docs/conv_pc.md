@@ -121,7 +121,7 @@ only the headers that cannot work on x86:
 
 ## Game-source changes (M3)
 
-15. **`source/system/main.cpp:89` (USE_SCREEN_UTILS gate)** — the DEBUG
+15. **`source/system/main.cpp:89` (USE_SCREEN_UTILS gate)** ï¿½ the DEBUG
     screen utils (SELECT=VRamViewer, L2+START=SaveScreen) were gated on
     `__FILE_SYSTEM__==PC && !__USER_CDBUILD__`, i.e. compiled out of every
     CD build.  Both outer conditions gained a `|| !defined(PSX_MIPS_ASM)`
@@ -130,6 +130,91 @@ only the headers that cannot work on x86:
     pcfile.cpp`).  On the PlayStation build `PSX_MIPS_ASM` is defined, so
     both conditions reduce to the originals - verified by the PSX
     regression build.
+
+## Game-source changes (M4)
+
+16. **`source/system/main.cpp` (boot-scene select)** - the final `#else`
+    branch (`setNextScene(&FrontEndScene)`) gained a `!defined(PSX_MIPS_ASM)`
+    arm that asks the shim's `Port_BootLevel()` (port/psyq/host/args.cpp,
+    `--level` / `SBSP_BOOT_LEVEL`) for a LvlTable index: >=0 sets
+    `s_globalLevelSelectThing` and boots straight into `GameScene` for
+    testing, -1 keeps the original frontend boot.  Same shape as the
+    vintage `__USER_daveo__` dev path a few lines above.  On the
+    PlayStation build the arm reduces to the original line - verified by
+    the PSX regression build.
+
+17. **`source/platform/platform.cpp` (`CNpcPlatform::setCollisionAngle`)** -
+    latent null dereference, crashed on the first C1L1 boot: platforms
+    `postInit` during `CLevel::init`, which runs BEFORE `createPlayer()`
+    (game.cpp), so `GameScene.getPlayer()` is NULL and
+    `player->isOnPlatform()` reads NULL+offset.  On PS1 address 0 is
+    readable kernel RAM and the garbage never compares equal to a platform
+    pointer, so the bug was invisible; Win32 faults.  Guarded with
+    `player&&` - behaviour-identical to what the hardware actually did.
+    Same latent-bug class as entry #13.
+
+18. **`source/level/layertile3d.cpp` (tile-window margins)** - user-visible
+    on PC: the 3D action layer vanished from the bottom (and, at worst
+    scroll phase, ~9px of the right edge) of the view.  The USA margins
+    (`SCREEN_TILE_ADJ_D=1`, `_R=3`) are tuned to CRT overscan: the far
+    plane (z=+64) projects at 378/442 = 0.855, so the bottom 8-21 lines of
+    the 256-line framebuffer were never covered - and never visible on an
+    NTSC TV.  A PC window shows the whole framebuffer.  Fix is the one the
+    original devs made for PAL's taller visible area (EUR `D=3`, with its
+    own comment saying exactly this): a `!defined(PSX_MIPS_ASM)` arm with
+    `D=3, R=4`.  Both console territory arms are untouched - verified by
+    the PSX regression build.
+
+19. **Blank-frame null dereferences in the render paths** (`gfx/actor.cpp`,
+    `player/player.cpp`, `enemy/ndogfish.cpp`, `enemy/ndustdev.cpp`,
+    `enemy/nfdutch.cpp`, `enemy/nghost.cpp`, `enemy/nmjfish.cpp`) - the
+    largest instance of the entry #13/#17 class, and a genuine crash:
+    three levels segfaulted within seconds of the M4 scripted sweep.
+
+    `CActorGfx::Render` returns NULL for a *blank frame* - authored data,
+    not an error: `CacheFrame` (actor.cpp:539) does `if
+    (!CurrentFrameGfx->PAKSpr) return(0)`.  Callers then write straight
+    through the result: `setSemiTrans`/`setShadeTex`/`setRGB0` are stock
+    PSY-Q macros that dereference unconditionally, as does
+    `CActorGfx::RotateScale`.  On PS1 that wrote a byte at address 0 -
+    writable kernel RAM the game never relied on - so the bug was
+    invisible for the console's whole life; Win32 faults.
+
+    The crash found was SpongeBob's own anim 14 frame 22 in
+    `CPlayer::renderSb` (all four `Render` sites there: the mode addon,
+    the jellyfish-in-net addon, the glove addon, and SpongeBob himself).
+    Being player code it was reachable in *any* level; C2L4/C3L3/C3L4 just
+    happened to play that animation within the 600-vblank sample.
+
+    An audit of every `CActorGfx::Render` call site found 18 more
+    unguarded dereferences, 14 of which reach the prim only through
+    `RotateScale`.  Those are fixed at the callee: `RotateScale` gets an
+    `if (!Ft4) return(0);` alongside its existing no-op early-out (which
+    already returns `Ft4` without touching it or the BBox, so callers
+    tolerate the passthrough).  The remaining sites - the five enemy
+    files above - guard their direct macro writes with `if (SprFrame)`.
+    Sites that merely discard the return value were left alone.
+
+20. **`source/gfx/prim.h` (`MAX_PRIMS`)** - the PC build doubles the prim
+    pool to 4096 entries (163,840 bytes per buffer); the console arm keeps
+    the original 2048 and is verified unchanged by the PSX regression.
+
+    Two reasons.  The PC renders a wider 3D tile window than any console
+    territory (entry #18), which raised the per-frame peak; and the budget
+    cannot be *proved* by measurement the way a fixed console target's
+    could - a played session runs ~1.4x the peak that scripted input
+    reaches (measured: C1L1 39,180 and 39,276 bytes played vs 28,516
+    scripted), so bounding it honestly would mean playing all 25 levels to
+    completion.  A partial human run of the densest level reached 72.7% of
+    the ORIGINAL budget without finishing.
+
+    The failure mode is what settles it: `CLayerTile3d::render()` writes
+    through a raw `PrimPtr` with no bound check, and `PrimDisplay`'s own
+    `ASSERT(!"PRIM OVERFLOW")` is both post-hoc and compiled out of FINAL,
+    so an overrun corrupts whatever `MemAlloc` placed after the pool,
+    silently, in the shipping variant.  80KB of insurance against an 8MB
+    arena is not a trade worth agonising over.  The shim's high-water
+    watchdog (port/psyq/gpu/gp0.cpp) remains the detector.
 
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 

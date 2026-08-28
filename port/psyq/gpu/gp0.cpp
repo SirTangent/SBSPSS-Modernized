@@ -395,9 +395,83 @@ static void verifyArenaWindowOnce(void)
 	g_arenaEnd  = end + 1;
 }
 
+/*	Prim-pool high-water watch.  These are the game's own pool pointers
+	(source/gfx/prim.cpp) - plain file-scope globals, so unmangled.
+
+	It lives here rather than in the game because prim.cpp's own overflow
+	check is post-hoc (`if(CurrPrim>=EndPrim) ASSERT` in PrimDisplay, AFTER
+	a frame has already written past the buffer) and ASSERT compiles to
+	nothing in FINAL, so an overrun corrupts whatever MemAlloc placed after
+	the pool, silently, in the shipping variant.  CLayerTile3d::render()
+	writes through a raw pointer with no bound check of its own, and the PC
+	build widened the 3D tile window (conv_pc.md #18), which raised the
+	peak - so the remaining headroom is worth watching in both variants.
+
+	DrawOTag is called from PrimDisplay at the exact peak of a frame's
+	fill, which makes it the cheapest correct sampling point.
+
+	Declared WEAK because the shim's own unit tests (gpu_test and friends)
+	link psyq_shim with no game code at all: there the symbols resolve to
+	NULL and the watch simply does nothing.  */
+extern unsigned char	*CurrPrim __attribute__((weak));
+extern unsigned char	*EndPrim __attribute__((weak));
+extern unsigned char	*PrimListStart __attribute__((weak));
+extern unsigned char	*PrimListEnd __attribute__((weak));
+
+static void primPoolWatch(void)
+{
+	static size_t	peak;
+	static int		warned;
+	static int		logging = -1;
+	int				advanced = 0;
+
+	/*	The NULL test has to be on the ADDRESSES: an unresolved weak symbol
+		resolves to address 0, so reading the pointers themselves would
+		fault before any value check could run.  */
+	unsigned char	**currp  = &CurrPrim;
+	unsigned char	**endp   = &EndPrim;
+	unsigned char	**startp = &PrimListStart;
+	unsigned char	**listendp = &PrimListEnd;
+
+	if (!currp || !endp || !startp || !listendp)
+		return;						/* no game code linked (shim unit tests) */
+	if (!*startp || !*listendp || !*currp || !*endp)
+		return;						/* PrimInit has not run yet */
+
+	/*	Both buffers are one allocation, so the per-buffer budget is half
+		the span - no need to duplicate PRIMPOOL_SIZE here.  `used` is
+		signed on purpose: past the end it reads above the pool size.  */
+	ptrdiff_t	pool = (*listendp - *startp) / 2;
+	ptrdiff_t	used = pool - (*endp - *currp);
+
+	if (used > (ptrdiff_t)peak)
+	{
+		peak = (size_t)used;
+		advanced = 1;
+	}
+	if (logging < 0)
+	{
+		const char *e = getenv("SBSP_PRIM_LOG");
+		logging = (e && *e && *e != '0');
+	}
+	if (logging && advanced)
+		fprintf(stderr, "[gpu] prim pool high-water %ld/%ld bytes (%.1f%%)\n",
+				(long)used, (long)pool, 100.0 * (double)used / (double)pool);
+
+	if (!warned && used > pool - pool / 8)		/* inside the last 12.5% */
+	{
+		warned = 1;
+		fprintf(stderr, "[gpu] WARNING: prim pool at %ld/%ld bytes (%.1f%%) - "
+						"raise MAX_PRIMS (source/gfx/prim.h) before it overruns; "
+						"the game's own check is DEBUG-only and post-hoc\n",
+				(long)used, (long)pool, 100.0 * (double)used / (double)pool);
+	}
+}
+
 extern "C" void DrawOTag(u_long *p)
 {
 	verifyArenaWindowOnce();
+	primPoolWatch();
 
 	uintptr_t	window = (uintptr_t)p & ~(uintptr_t)0xFFFFFF;
 	uint32_t	*tagp  = (uint32_t *)p;

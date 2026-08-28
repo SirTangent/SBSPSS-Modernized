@@ -706,11 +706,15 @@ void CNpcFlyingDutchmanEnemy::render()
 			DVECTOR &renderPos=getRenderPos();
 
 			SprFrame = m_actorGfx->Render(renderPos,m_animNo,( m_frame >> 8 ),m_reversed);
-			setShadeTex(SprFrame,0);
-			setSemiTrans( SprFrame, true );
-			SprFrame->tpage|=1<<5;
-			m_actorGfx->RotateScale( SprFrame, renderPos, 0, 5120, 5120 );
-			setRGB0( SprFrame, m_fadeVal, m_fadeVal, m_fadeVal );
+			// PC port: NULL = blank frame (see CActorGfx::CacheFrame)
+			if (SprFrame)
+			{
+				setShadeTex(SprFrame,0);
+				setSemiTrans( SprFrame, true );
+				SprFrame->tpage|=1<<5;
+				m_actorGfx->RotateScale( SprFrame, renderPos, 0, 5120, 5120 );
+				setRGB0( SprFrame, m_fadeVal, m_fadeVal, m_fadeVal );
+			}
 
 			sBBox boundingBox = m_actorGfx->GetBBox();
 

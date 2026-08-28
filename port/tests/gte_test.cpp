@@ -11,6 +11,7 @@
 
 #include <sys/types.h>
 #include <libgte.h>
+#include <inline_c.h>			/* the gte_* macros layertile3d itself uses */
 
 #include "gte/gte_core.h"
 
@@ -250,6 +251,105 @@ int main()
 		TransposeMatrix(&m, &t);
 		CHK(t.m[0][1], m.m[1][0]);
 		CHK(t.m[1][0], m.m[0][1]);
+	}
+
+	/* ---- RotMatrix_gte: the X+Z composite (hbbarrel.cpp:195) ------- */
+	/*	Every other caller in the tree rotates about ONE axis, where the
+		library's nested truncation cannot show; hbbarrel is the only
+		{X,0,Z} case, so it is the only place the evaluation ORDER is
+		observable.  With vy=0 (s1=0, c1=ONE) every s1 term drops out and
+		the result must collapse to a plain Rx*Rz with ONE >>12 per
+		element - if a rewrite ever hoists or re-nests the shifts, the
+		single-shift expectations below stop matching.  */
+	{
+		MATRIX		m;
+		SVECTOR		r;
+		const int	ax = 300, az = 700;			/* arbitrary, non-special */
+		int			s0 = rsin(ax), c0 = rcos(ax);
+		int			s2 = rsin(az), c2 = rcos(az);
+
+		r.vx = ax; r.vy = 0; r.vz = az; r.pad = 0;
+		RotMatrix_gte(&r, &m);
+
+		CHK(m.m[0][0], (short)c2);				/* (c1*c2)>>12, c1==ONE */
+		CHK(m.m[0][1], (short)(-s2));
+		CHK(m.m[0][2], 0);						/* s1 == rsin(0) */
+		CHK(m.m[1][0], (short)((c0 * s2) >> 12));
+		CHK(m.m[1][1], (short)((c0 * c2) >> 12));
+		CHK(m.m[1][2], (short)(-s0));			/* -((s0*ONE)>>12) */
+		CHK(m.m[2][0], (short)((s0 * s2) >> 12));
+		CHK(m.m[2][1], (short)((s0 * c2) >> 12));
+		CHK(m.m[2][2], (short)c0);
+
+		/*	90 degrees on both axes - closed form, independent of the
+			trig table.  */
+		r.vx = 1024; r.vy = 0; r.vz = 1024;
+		RotMatrix_gte(&r, &m);
+		CHK(m.m[0][0], 0);      CHK(m.m[0][1], -4096); CHK(m.m[0][2], 0);
+		CHK(m.m[1][0], 0);      CHK(m.m[1][1], 0);     CHK(m.m[1][2], -4096);
+		CHK(m.m[2][0], 4096);   CHK(m.m[2][1], 0);     CHK(m.m[2][2], 0);
+	}
+
+	/* ---- layertile3d's op sequence --------------------------------- */
+	/*	The 3D action layer is the port's heaviest GTE consumer and uses a
+		shape nothing else does.  These pin the three things that would
+		silently corrupt the tile layer if the shim drifted.  */
+	{
+		/*	(a) CMX_SetRotMatrixXY (layertile3d.h) writes the flip matrix
+			as two PACKED PAIRS into ctrl 0 and ctrl 2 - R11|R12<<16 and
+			R22|R23<<16 - never touching R13/R21/R31/R32/R33.  A packing
+			mismatch here shows up as tiles that fail to mirror.  */
+		setupIdentity350();
+		const short	Mtx[4] = { -4096, 0, 4096, 0 };		/* X mirror */
+		GTE_WriteCtrl(0, (u_long)(unsigned short)Mtx[0]
+						 | ((u_long)(unsigned short)Mtx[1] << 16));
+		GTE_WriteCtrl(2, (u_long)(unsigned short)Mtx[2]
+						 | ((u_long)(unsigned short)Mtx[3] << 16));
+		CHK(GTE_ReadCtrl(0), 0x0000F000ul);
+		CHK(GTE_ReadCtrl(2), 0x00001000ul);
+
+		loadV(0, 100, -50, 700);
+		GTEport_Op(0x0000007f);						/* rtps */
+		CHK(GTE_ReadData(14), 0xFFE7FFCEul);		/* SX negated, SY intact */
+
+		/*	(b) the pipelined batch (layertile3d.cpp:270-283): the game
+			preloads the NEXT triangle with ldv3 before storing the
+			CURRENT one with stsxy3c.  That is only valid if loading V0-V2
+			leaves the SXY fifo alone - if it did not, every tile would
+			take the following tile's screen coordinates.  */
+		setupIdentity350();
+		SVECTOR	a0 = { 100, -50, 700, 0 };
+		SVECTOR	a1 = {   0,   0, 700, 0 };
+		SVECTOR	a2 = { -100, 50, 700, 0 };
+		SVECTOR	b  = { 200, 200, 700, 0 };
+		u_long	out[3] = { 0, 0, 0 };
+
+		gte_ldv3(&a0, &a1, &a2);
+		gte_rtpt_b();
+		gte_ldv3(&b, &b, &b);					/* preload, must not disturb */
+		gte_stsxy3c(out);
+		CHK(out[0], 0xFFE70032ul);				/* ( 50,-25) */
+		CHK(out[1], 0x00000000ul);				/* (  0,  0) */
+		CHK(out[2], 0x0019FFCEul);				/* (-50, 25) */
+
+		/*	(c) ldsxy0/1/2 -> nclip_b -> stopz.  The layer draws a tile
+			when MAC0 is NEGATIVE, and mirrored tiles flip that test by
+			XORing the sign bit, so the sign convention is load-bearing in
+			both directions.  stopz reads MAC0 (data reg 24).  */
+		long	clipZ = 0;
+		gte_ldsxy0(0x00000000);					/* (  0,  0) */
+		gte_ldsxy1(0x00000064);					/* (100,  0) */
+		gte_ldsxy2(0x00640000);					/* (  0,100) */
+		gte_nclip_b();
+		gte_stopz(&clipZ);
+		CHK(clipZ, 10000);						/* one winding: positive */
+
+		gte_ldsxy1(0x00640000);					/* swap 1 and 2 */
+		gte_ldsxy2(0x00000064);
+		gte_nclip_b();
+		gte_stopz(&clipZ);
+		CHK(clipZ, -10000);						/* the other: negative */
+		CHK((u_long)clipZ >> 31, 1);			/* the bit the layer tests */
 	}
 
 	if (g_failures)

@@ -16,7 +16,21 @@
 #endif
 
 #define	MAX_OT				(16)
+#if	!defined(PSX_MIPS_ASM)
+// PC port: double the pool.  The console budget has no headroom to spare for
+// the wider 3D tile window this build uses (layertile3d.cpp, conv_pc.md #18),
+// and it cannot be verified by measurement the way the console's was: real
+// play runs ~1.4x the peak that scripted input reaches, so proving a bound
+// would mean playing every level to completion.  The failure mode argues for
+// insurance - CLayerTile3d::render() writes through a raw pointer with no
+// bound check, and prim.cpp's own overflow check is post-hoc AND compiles
+// away in FINAL, so an overrun silently corrupts whatever MemAlloc placed
+// after the pool.  The extra 80KB is nothing against the 8MB PC arena.
+// Measured peaks that motivated this are in port/docs/debug-tools.md section 9.
+#define	MAX_PRIMS			((1024*4))
+#else
 #define	MAX_PRIMS			((1024*2))		// Took off 512 as mid layer now pre-stored as TSPRTs
+#endif
 
 //#define	USE_NTAGS			1
 

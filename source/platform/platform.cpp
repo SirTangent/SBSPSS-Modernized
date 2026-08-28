@@ -856,8 +856,12 @@ void CNpcPlatform::setCollisionAngle(int newAngle)
 	CPlayer	*player;
 
 	// Is the player stood on this platform as it rotates?
+	// PC port: platforms postInit during CLevel::init, BEFORE createPlayer()
+	// (game.cpp) - the NULL read was harmless on PS1 (address 0 is readable
+	// kernel RAM, and kernel garbage never compares equal to a platform),
+	// but faults on Win32.
 	player=GameScene.getPlayer();
-	if(player->isOnPlatform()==this)
+	if(player&&player->isOnPlatform()==this)
 	{
 		DVECTOR	const &playerPos=player->getPos();
 

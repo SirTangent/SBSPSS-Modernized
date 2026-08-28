@@ -21,7 +21,7 @@ has none of them.
 Run from the **repo root**: the CD path is relative
 (`out/<TERRITORY>/<VERSION>/version/CD/BIGLUMP.BIN`). FINAL looks for
 `out/USA/FINAL/...`, which does not exist in this tree - only the DEBUG data
-has been built - so the FINAL exe needs `SBSP_DATA_DIR` (see §3) or it exits 3
+has been built - so the FINAL exe needs `SBSP_DATA_DIR` (see §4) or it exits 3
 at `CdInit`.
 
 
@@ -40,17 +40,43 @@ alive only because the shim's `PadGetState` pumps. It spins a core while open -
 expected, it is a debug tool.
 
 
-## 3. Environment variables
+## 3. Boot arguments (M4)
+
+`sbsp.exe --help` prints the full surface.  The headline one:
+
+```powershell
+port\build\debug\sbsp.exe --level 1-2        # boot straight into Chapter 1 Level 2
+```
+
+`--level C-L` takes chapter 1-5, level 1-5 (level 5 is that chapter's bonus
+level; `6-N` also addresses bonus level N), or a raw `LvlTable` index 0-24.
+It skips the frontend entirely - `InitSystem` runs, then the scene select
+jumps straight to `GameScene` (the same shape as the vintage
+`__USER_daveo__` dev build).  Env equivalent: `SBSP_BOOT_LEVEL`.
+
+The remaining arguments are aliases for the environment variables in §4 -
+same names without the prefix: `--data-dir`, `--pad-script`,
+`--dump-frames`, `--dump-dir`, `--exit-after`, `--no-cd-pace`, and
+`--pace-log` (§6).  Both `--flag value` and `--flag=value` work; an
+argument overrides an inherited env var.  Unknown arguments warn and are
+ignored.
+
+Implementation: `port/psyq/host/args.cpp` (parsed before any static
+initialiser consumes its configuration) + the `Port_BootLevel` hook in
+`source/system/main.cpp` (conv_pc.md entry 16).
+
+## 4. Environment variables
 
 All optional, all read once at startup.
 
 | Var | Meaning |
 |---|---|
 | `SBSP_DATA_DIR` | Override the CD data directory. Needed to run the FINAL exe: `out/USA/DEBUG/version/CD`. |
-| `SBSP_PAD_SCRIPT` | Inject controller input at given vblanks (§4). |
+| `SBSP_PAD_SCRIPT` | Inject controller input at given vblanks (§5). |
 | `SBSP_DUMP_FRAMES` | Comma-separated vblank numbers; writes the **displayed** VRAM region as a 24-bit BMP at each. Max 16. |
 | `SBSP_DUMP_DIR` | Where those BMPs go (default `.`). Files are `sbsp_frame_<vblank>.bmp`. |
 | `SBSP_EXIT_AFTER` | Clean `exit(0)` at that vblank. The game's `MainLoop` has no exit path of its own, so scripted runs need this. |
+| `SBSP_PRIM_LOG` | Print the prim-pool high-water mark each time it rises (§6). Use it to measure headroom against `MAX_PRIMS` after any change that adds primitives per frame. |
 | `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). |
 
 The frame dumps read emulated VRAM directly, so they work **even if Vulkan
@@ -61,7 +87,7 @@ Implementation: `port/psyq/host/window.cpp` (dump/exit),
 `port/psyq/cd/cd.cpp` (data dir, pacing).
 
 
-## 4. `SBSP_PAD_SCRIPT` - scripted input
+## 5. `SBSP_PAD_SCRIPT` - scripted input
 
 Format: `"vblank:HEXMASK[,vblank:HEXMASK...]"`, up to 64 entries.
 
@@ -102,6 +128,32 @@ stuck START is a confusing five minutes:
 Remove-Item Env:SBSP_PAD_SCRIPT, Env:SBSP_DUMP_FRAMES, Env:SBSP_DUMP_DIR, Env:SBSP_EXIT_AFTER
 ```
 
+**Do not combine a long pad script with `--no-cd-pace`.** Vblanks are
+wall-clock paced, so an instant load consumes however many vblanks the real
+file I/O happened to take - which varies run to run. A script that reaches
+the map on one run can stall at the title on the next. With CD pacing left
+ON, loads take a fixed number of *emulated* vblanks and a script replays
+identically; the full frontend route below reproduces exactly that way.
+Scripts that only need a few hundred vblanks in one scene are unaffected.
+
+Route that reaches gameplay from a cold boot (new game -> intro FMA ->
+map -> Chapter 1 Level 1), alternating START and CROSS every 220 vblanks so
+the exact arrival time of each prompt does not matter:
+
+```powershell
+$e = @(); $t = 800
+for ($n = 0; $n -lt 26; $n++) {
+  $m = if ($n % 2 -eq 0) { "0800" } else { "0040" }
+  $e += "${t}:$m"; $e += "$($t+12):0000"; $t += 220
+}
+$env:SBSP_PAD_SCRIPT = ($e -join ",")
+port\build\debug\sbsp.exe --exit-after 6600
+```
+
+Scene transitions are printed by the game itself on stdout
+(`GameState: Opening new scene '...'`), which is the cheapest way to see
+how far a scripted run got: expect `FrontEnd -> FMA -> Map -> Game`.
+
 Live keyboard is the RetroArch layout: arrows = D-pad, Z/X/A/S =
 Cross/Circle/Square/Triangle, Enter = Start, RShift = Select, Q/W = L1/R1,
 E/R = L2/R2. A connected SDL gamepad ORs in on top and hotplugs.
@@ -109,7 +161,7 @@ E/R = L2/R2. A connected SDL gamepad ORs in on top and hotplugs.
 Implementation: `port/psyq/host/input.cpp`.
 
 
-## 5. Logging
+## 6. Logging
 
 Everything shim-side goes to **stderr** with a bracketed tag, so
 `2>&1 | Select-String` filters it:
@@ -119,7 +171,19 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
   misbehaves, check here first.
 - `[gpu] unknown/unimplemented GP0 command 0xNN` - once per opcode.
 - `[gte] ...`, `[input] gamepad connected: ...`,
-  `[input] SBSP_PAD_SCRIPT: N entries`, `[host] wrote ....bmp`.
+  `[input] SBSP_PAD_SCRIPT: N entries`, `[host] wrote ....bmp`,
+  `[args] boot level: ...`, `[cd] XA stream chan N: end-of-stream ...`.
+- `[gpu] prim pool high-water N/M bytes` (with `SBSP_PRIM_LOG=1`) - the
+  peak bytes used in one prim buffer, sampled in `DrawOTag`, i.e. at the
+  exact peak of a frame's fill. **A `[gpu] WARNING: prim pool ...` line
+  prints in BOTH variants** once usage passes 87.5%: the game's own
+  overflow check (`prim.cpp`'s `ASSERT(!"PRIM OVERFLOW")`) is post-hoc and
+  compiles away in FINAL, so without this a pool overrun would silently
+  corrupt the heap in the shipping build. Measured peaks are in §10.
+- `--pace-log` (or `SBSP_PACE_LOG=1`): every 300 vblanks, `[pace]` prints
+  delivered vblanks vs `VSync(0)` waits - `vbl/frame 1.00` is locked
+  full-rate; the M3 frontend read ~6 before the present was decoupled from
+  emulated time.
 
 Game-side `SYSTEM_DBGMSG` goes to **stdout**, prefixed `file:line`. Only the
 `DC_SYSTEM` channel is enabled by default (`source/system/dbg.cpp:74`); call
@@ -132,7 +196,7 @@ with the standard font, then hit `PSYQpause()` - which on PC is
 debugger.
 
 
-## 6. Unit tests
+## 7. Unit tests
 
 Four self-contained exes per variant in `port\build\<variant>\`; each exits 0
 on pass and prints its own failures:
@@ -154,7 +218,7 @@ port\build\final\sbsp_headless.exe
 ```
 
 
-## 7. GDB
+## 8. GDB
 
 Use the MSYS2 one - it reads DWARF 5; the vintage `C:\MinGW\bin\gdb` does not:
 
@@ -167,7 +231,51 @@ at all), `Port_Pump`, `DoAssert`, `GPU_DrawPrim`. Set the environment before
 launching, or use `set environment SBSP_EXIT_AFTER 1300` inside gdb.
 
 
-## 8. Gotcha worth memorising
+## 9. Measured budgets (M4 sweep)
+
+Baselines to compare against after any change that adds primitives or grows
+a render window. Re-measure with:
+
+```powershell
+$env:SBSP_PRIM_LOG = "1"
+port\build\debug\sbsp.exe --level 1-1 --no-cd-pace --pad-script "240:2000,600:0000" --exit-after 600
+```
+
+**Prim pool** - the budget is `MAX_PRIMS * MAX_PRIM_SIZE`, which the PC
+build doubles to **163,840 bytes per buffer** (`source/gfx/prim.h`,
+conv_pc.md #20; the console keeps 81,920). It is a *byte* budget, not a
+primitive count, so mixed primitive sizes matter.
+
+**Scripted input understates the real peak by ~1.4x.** Two full C1L1 play
+sessions of different lengths peaked at 39,180 and 39,276 bytes, against
+28,516 for the scripted walk - so treat every figure in the table below as
+a floor, not a bound. A partial (unfinished) human run of Chapter 4 Level 3
+reached 59,544, already above its scripted 52,308. That gap, and the fact
+that proving a real bound would mean playing all 25 levels to completion,
+is why the PC pool was doubled rather than measured further.
+
+Sweeping all 25 bootable levels (600 vblanks each, walking right), against
+the ORIGINAL 81,920-byte budget:
+
+| | level | peak | of budget |
+|---|---|---|---|
+| worst | Chapter 4 Level 3 (`--level 4-3`) | 52,308 B | 63.9% |
+| next | Chapter 5 bonus (`--level 6-5`) | 50,392 B | 61.5% |
+| next | Chapter 1 bonus (`--level 6-1`) | 48,600 B | 59.3% |
+| typical | most levels | 26-38 KB | 32-46% |
+| lightest | Chapter 4 Level 1 | 17,380 B | 21.2% |
+
+Kelp World (bonus) levels are the dense ones, as expected - they are the
+vehicle levels. Against the doubled PC budget the worst scripted level sits
+at 31.9% and the worst measured human run at 36.3%, so the 87.5% warning
+has a wide margin. Re-measure with a *played* session, not a script, if you
+ever change what the renderer emits per frame.
+
+**Scratchpad**: C1L1 peaks at 240 B; the worst in the tree is 996 B
+(`CHAPTER06_LEVEL01`) against the 1 KB `PORT_Scratchpad`.
+
+
+## 10. Gotcha worth memorising
 
 **A vblank callback must never block on the pump.** A nested `Port_Pump` is a
 complete no-op (that is what keeps the vblank counter and its callback in

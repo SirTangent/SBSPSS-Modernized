@@ -604,7 +604,10 @@ void CNpcIronDogfishEnemy::render()
 			SprFrame = m_actorGfx->Render(renderPos,m_animNo,( m_frame >> 8 ),m_reversed);
 			m_actorGfx->RotateScale( SprFrame, renderPos, 0, 4096, 4096 );
 
-			if ( m_vulnerableTimer > 0 && m_invulnerableTimer <= 0 )
+			// PC port: Render() returns NULL for a blank frame (see
+			// CActorGfx::CacheFrame) - harmless to write through on PS1,
+			// faults on Win32.
+			if ( SprFrame && m_vulnerableTimer > 0 && m_invulnerableTimer <= 0 )
 			{
 				setShadeTex(SprFrame,0);
 				setRGB0( SprFrame, 255, 255, 255 );

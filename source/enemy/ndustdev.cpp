@@ -49,9 +49,13 @@ void CNpcDustDevilEnemy::render()
 			DVECTOR &renderPos=getRenderPos();
 
 			SprFrame = m_actorGfx->Render(renderPos,m_animNo,( m_frame >> 8 ),m_reversed);
-			setSemiTrans( SprFrame, true );
-			m_actorGfx->RotateScale( SprFrame, renderPos, m_drawRotation, 4096, 4096 );
-			setRGB0( SprFrame, m_fadeVal, m_fadeVal, m_fadeVal );
+			// PC port: NULL = blank frame (see CActorGfx::CacheFrame)
+			if (SprFrame)
+			{
+				setSemiTrans( SprFrame, true );
+				m_actorGfx->RotateScale( SprFrame, renderPos, m_drawRotation, 4096, 4096 );
+				setRGB0( SprFrame, m_fadeVal, m_fadeVal, m_fadeVal );
+			}
 
 			sBBox boundingBox = m_actorGfx->GetBBox();
 			setCollisionSize( ( boundingBox.XMax - boundingBox.XMin ), ( boundingBox.YMax - boundingBox.YMin ) );
