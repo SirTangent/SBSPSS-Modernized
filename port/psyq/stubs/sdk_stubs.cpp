@@ -55,14 +55,12 @@ long DecDCTout() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
-long InitXMData() { PSYQ_STUB_ONCE(); return 0; }
 long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
 long StFreeRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetStream() { PSYQ_STUB_ONCE(); return 0; }
 long StUnSetRing() { PSYQ_STUB_ONCE(); return 0; }
 long XM_ClearSFXRange() { PSYQ_STUB_ONCE(); return 0; }
-long XM_CloseVAB() { PSYQ_STUB_ONCE(); return 0; }
 /*	Nonzero = "this song/SFX has finished" (xmplay.cpp:208-215): the caller
 	marks the channel SILENT and XM_Quits it, freeing it for reuse.  The old
 	0 return meant "still playing" forever - channels leaked one one-shot
@@ -70,22 +68,13 @@ long XM_CloseVAB() { PSYQ_STUB_ONCE(); return 0; }
 	plays in).  With no audio until M5, everything finishing instantly is
 	the correct degenerate behaviour.  */
 long XM_GetFeedback() { PSYQ_STUB_ONCE(); return 1; }
-long XM_GetFileHeaderSize() { PSYQ_STUB_ONCE(); return 0; }
-long XM_GetSampleAddress() { PSYQ_STUB_ONCE(); return 0; }
-long XM_GetSongSize() { PSYQ_STUB_ONCE(); return 0; }
 long XM_Init() { PSYQ_STUB_ONCE(); return 0; }
-long XM_OnceOffInit() { PSYQ_STUB_ONCE(); return 0; }
 long XM_PlaySample() { PSYQ_STUB_ONCE(); return 0; }
 long XM_PlayStop() { PSYQ_STUB_ONCE(); return 0; }
 long XM_Quit() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetFileHeaderAddress() { PSYQ_STUB_ONCE(); return 0; }
 long XM_SetMasterPan() { PSYQ_STUB_ONCE(); return 0; }
 long XM_SetMasterVol() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetMono() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetSongAddress() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetStereo() { PSYQ_STUB_ONCE(); return 0; }
 long XM_StopSample() { PSYQ_STUB_ONCE(); return 0; }
 long XM_Update() { PSYQ_STUB_ONCE(); return 0; }
-long XM_VABInit() { PSYQ_STUB_ONCE(); return 0; }
 
 }

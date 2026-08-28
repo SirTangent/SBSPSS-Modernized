@@ -144,6 +144,7 @@ target_include_directories(psyq_shim PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/psyq
     ${SBSP_ROOT}
     ${SBSP_ROOT}/source
+    ${SBSP_ROOT}/tools/mod/include
     ${SBSP_ROOT}/out/${SBSP_TERRITORY}/include
 )
 if(TARGET SDL3::SDL3-static)
@@ -192,6 +193,7 @@ function(sbsp_shim_test name)
         ${CMAKE_CURRENT_SOURCE_DIR}/psyq
         ${SBSP_ROOT}
         ${SBSP_ROOT}/source
+        ${SBSP_ROOT}/tools/mod/include
     )
     target_link_options(${name} PRIVATE -static)
     target_link_libraries(${name} PRIVATE psyq_shim)
@@ -202,3 +204,4 @@ sbsp_shim_test(gte_test)        # software cop2 / libgte fixtures (M3)
 sbsp_shim_test(gpu_test)        # software GPU: VRAM ops, OT walker, goldens
 sbsp_shim_test(adpcm_test)      # SPU ADPCM decoder golden vectors (M5)
 sbsp_shim_test(spu_test)        # SPU voice mixer: gaussian/ADSR/pan (M5)
+sbsp_shim_test(xm_test)         # XMPlayer: PXM parse vs .xm, VAB upload (M5)
