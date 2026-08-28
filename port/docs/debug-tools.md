@@ -176,7 +176,8 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
   `[input] SBSP_PAD_SCRIPT: N entries`, `[host] wrote ....bmp`,
   `[args] boot level: ...`, `[cd] XA stream chan N: end-of-stream ...`.
 - `[spu]` (M5) - software-SPU anomalies: SpuMalloc exhaustion/table-full,
-  out-of-range transfers, unimplemented `SpuSetVoiceAttr` mask bits.
+  out-of-range transfers, an out-of-range voice number, unimplemented
+  `SpuSetVoiceAttr` mask bits.
 - `[xm]` (M5) - XMPlayer anomalies: bad PXM/VH data, slot exhaustion,
   an XM effect outside the implemented (XMPLAY.LIB) set, the deferred
   looping-sample path being reached.  A clean run prints **neither**
