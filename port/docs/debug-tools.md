@@ -128,6 +128,32 @@ stuck START is a confusing five minutes:
 Remove-Item Env:SBSP_PAD_SCRIPT, Env:SBSP_DUMP_FRAMES, Env:SBSP_DUMP_DIR, Env:SBSP_EXIT_AFTER
 ```
 
+**Do not combine a long pad script with `--no-cd-pace`.** Vblanks are
+wall-clock paced, so an instant load consumes however many vblanks the real
+file I/O happened to take - which varies run to run. A script that reaches
+the map on one run can stall at the title on the next. With CD pacing left
+ON, loads take a fixed number of *emulated* vblanks and a script replays
+identically; the full frontend route below reproduces exactly that way.
+Scripts that only need a few hundred vblanks in one scene are unaffected.
+
+Route that reaches gameplay from a cold boot (new game -> intro FMA ->
+map -> Chapter 1 Level 1), alternating START and CROSS every 220 vblanks so
+the exact arrival time of each prompt does not matter:
+
+```powershell
+$e = @(); $t = 800
+for ($n = 0; $n -lt 26; $n++) {
+  $m = if ($n % 2 -eq 0) { "0800" } else { "0040" }
+  $e += "${t}:$m"; $e += "$($t+12):0000"; $t += 220
+}
+$env:SBSP_PAD_SCRIPT = ($e -join ",")
+port\build\debug\sbsp.exe --exit-after 6600
+```
+
+Scene transitions are printed by the game itself on stdout
+(`GameState: Opening new scene '...'`), which is the cheapest way to see
+how far a scripted run got: expect `FrontEnd -> FMA -> Map -> Game`.
+
 Live keyboard is the RetroArch layout: arrows = D-pad, Z/X/A/S =
 Cross/Circle/Square/Triangle, Enter = Start, RShift = Select, Q/W = L1/R1,
 E/R = L2/R2. A connected SDL gamepad ORs in on top and hotplugs.
