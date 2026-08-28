@@ -22,7 +22,10 @@
 	  --dump-frames <list>  SBSP_DUMP_FRAMES
 	  --dump-dir <path>     SBSP_DUMP_DIR
 	  --exit-after <n>      SBSP_EXIT_AFTER
+	  --dump-audio <wav>    SBSP_DUMP_AUDIO (M5: deterministic mixer dump,
+	                        disables the playback device)
 	  --no-cd-pace          SBSP_CD_PACE=0
+	  --no-audio            SBSP_NO_AUDIO=1
 	  --pace-log            SBSP_PACE_LOG=1
 
 	Both "--flag value" and "--flag=value" spellings work.  Unknown
@@ -72,7 +75,9 @@ static void usage(void)
 		"  --dump-frames <list>  BMP dump vblanks         (SBSP_DUMP_FRAMES)\n"
 		"  --dump-dir <path>     where dumps go           (SBSP_DUMP_DIR)\n"
 		"  --exit-after <n>      clean exit at vblank n   (SBSP_EXIT_AFTER)\n"
+		"  --dump-audio <wav>    mixer audio to WAV       (SBSP_DUMP_AUDIO)\n"
 		"  --no-cd-pace          instant loads            (SBSP_CD_PACE=0)\n"
+		"  --no-audio            no playback device       (SBSP_NO_AUDIO=1)\n"
 		"  --pace-log            frame-pacing stderr log  (SBSP_PACE_LOG=1)\n"
 		"See port/docs/debug-tools.md for details.\n");
 }
@@ -114,6 +119,7 @@ static void parseArgs(void)
 		{ "--dump-frames", "SBSP_DUMP_FRAMES" },
 		{ "--dump-dir",    "SBSP_DUMP_DIR"    },
 		{ "--exit-after",  "SBSP_EXIT_AFTER"  },
+		{ "--dump-audio",  "SBSP_DUMP_AUDIO"  },
 	};
 
 	const char *e = getenv("SBSP_BOOT_LEVEL");
@@ -140,6 +146,11 @@ static void parseArgs(void)
 		if (strcmp(__argv[i], "--pace-log") == 0)
 		{
 			_putenv("SBSP_PACE_LOG=1");
+			continue;
+		}
+		if (strcmp(__argv[i], "--no-audio") == 0)
+		{
+			_putenv("SBSP_NO_AUDIO=1");
 			continue;
 		}
 		int matched = 0;

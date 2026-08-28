@@ -140,6 +140,11 @@ extern "C" void Host_EnsureVideo(void)
 	if (!g_vkUp)
 		fprintf(stderr, "[host] Vulkan presenter unavailable - window will stay "
 						"black (frame dumps still work)\n");
+
+	/*	audio joins the lazy video bring-up (NOT SpuInit: the unit tests
+		drive SpuInit directly and must never open a device)  */
+	extern void Host_EnsureAudio(void);
+	Host_EnsureAudio();
 }
 
 /*****************************************************************************/
