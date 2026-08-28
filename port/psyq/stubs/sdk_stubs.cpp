@@ -28,9 +28,6 @@ long DrawSync(long mode)
 	default would hang or crash the caller (found by /code-review on M1):
 */
 
-/*	spu.cpp:73 spins while(!SpuIsTransferCompleted(...)) - 1 == complete  */
-long SpuIsTransferCompleted() { PSYQ_STUB_ONCE(); return 1; }
-
 /*	fmv.cpp strNext() treats 0 as "sector ready" and dereferences the
 	never-written out-param; nonzero drains its timeout and playFMV exits
 	cleanly  */
@@ -59,25 +56,6 @@ long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
 long InitXMData() { PSYQ_STUB_ONCE(); return 0; }
-long SpuInit() { PSYQ_STUB_ONCE(); return 0; }
-long SpuInitMalloc() { PSYQ_STUB_ONCE(); return 0; }
-long SpuReserveReverbWorkArea() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonAttr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonCDMix() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonCDVolume() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonMasterVolume() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetEnv() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverb() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeDelayTime() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeDepth() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeFeedback() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeType() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbVoice() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferCallback() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferMode() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferStartAddr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetVoiceAttr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuWrite0() { PSYQ_STUB_ONCE(); return 0; }
 long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
 long StFreeRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetRing() { PSYQ_STUB_ONCE(); return 0; }

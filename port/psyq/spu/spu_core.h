@@ -57,6 +57,12 @@ extern SpuVoiceState g_spuVoice[SPU_NVOICES];
 	SpuSetCommonMasterVolume under the lock  */
 extern int16_t g_spuMasterVolL, g_spuMasterVolR;
 
+/*	CD-input bus (XA speech / FMV audio).  M5 only records the routing the
+	game programs (SpuSetCommonCDVolume/CDMix, cdxa.cpp); the feeder that
+	actually mixes decoded XA into Spu_RenderFrames is M6.  */
+extern int16_t g_spuCdVolL, g_spuCdVolR;
+extern int g_spuCdMixOn;
+
 /*	spu_adpcm.cpp: decode one 16-byte SPU ADPCM block into 28 PCM samples.
 	byte 0 = shift (low nibble; 13..15 act as 9) | filter (high nibble, 0..4),
 	byte 1 = loop flags, bytes 2..15 = 4-bit samples, low nibble first.

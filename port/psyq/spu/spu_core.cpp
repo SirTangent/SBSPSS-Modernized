@@ -21,6 +21,9 @@ uint8_t g_spuRam[SPU_RAM_SIZE];
 SpuVoiceState g_spuVoice[SPU_NVOICES];
 int16_t g_spuMasterVolL;
 int16_t g_spuMasterVolR;
+int16_t g_spuCdVolL;
+int16_t g_spuCdVolR;
+int g_spuCdMixOn;
 
 namespace
 {

@@ -9,6 +9,8 @@
 #include <cstring>
 #include <cstdlib>
 
+#include <libspu.h>
+
 #include "spu/spu_core.h"
 
 static int g_failures;
@@ -215,6 +217,85 @@ int main()
 		Spu_RenderFrames(buf2, 2048);
 		check(memcmp(buf, buf2, 2048 * 2 * sizeof(int16_t)) == 0,
 			  "re-keyed identical state renders bit-identical audio");
+	}
+
+	/* --- libspu API: transfer set + voice attr + keys --------------------- */
+	{
+		resetSpu();
+		SpuInit();
+		/*	stage the square-wave pair in host memory so SpuWrite is what
+			puts it into sound RAM  */
+		static uint8_t sample[32];
+		writeSquareSample(0x7000);
+		memcpy(sample, &g_spuRam[0x7000], 32);
+		memset(&g_spuRam[0x7000], 0, 32);
+		check(SpuSetTransferStartAddr(0x3000) == 0x3000,
+			  "SpuSetTransferStartAddr echoes the address");
+		check(SpuWrite(sample, 32) == 32, "SpuWrite reports full transfer");
+		check(SpuIsTransferCompleted(SPU_TRANSFER_PEEK) == 1,
+			  "SpuIsTransferCompleted: synchronous");
+		check(memcmp(&g_spuRam[0x3000], sample, 32) == 0,
+			  "SpuWrite landed at the transfer address");
+
+		SpuSetCommonMasterVolume(0x3FFF, 0x3FFF);
+		SpuVoiceAttr attr;
+		memset(&attr, 0, sizeof(attr));
+		attr.voice = SPU_VOICECH(2);
+		attr.mask = SPU_VOICE_VOLL | SPU_VOICE_VOLR | SPU_VOICE_PITCH |
+					SPU_VOICE_WDSA | SPU_VOICE_LSAX |
+					SPU_VOICE_ADSR_ADSR1 | SPU_VOICE_ADSR_ADSR2;
+		attr.volume.left = 0x3FFF;
+		attr.volume.right = 0x3FFF;
+		attr.pitch = 0x1000;
+		attr.addr = 0x3000;
+		attr.loop_addr = 0x3000;
+		attr.adsr1 = 0x000F;
+		attr.adsr2 = 0x0000;
+		SpuSetVoiceAttr(&attr);
+		SpuSetKey(SPU_ON, SPU_VOICECH(2));
+		Spu_RenderFrames(buf, 256);
+		check(peakAbs(buf, 256, 0) > 20000, "SpuSetVoiceAttr+SpuSetKey: audio");
+
+		char keys[SPU_NVOICES];
+		SpuGetAllKeysStatus(keys);
+		check(keys[2] == SPU_ON && keys[0] == SPU_OFF,
+			  "SpuGetAllKeysStatus reflects the keyed voice");
+		SpuSetKey(SPU_OFF, SPU_VOICECH(2));
+		Spu_RenderFrames(buf, 64);
+		SpuGetAllKeysStatus(keys);
+		check(keys[2] == SPU_OFF, "instant release reads back SPU_OFF");
+	}
+
+	/* --- SpuMalloc: first-fit, coalescing, the VAB-swap pattern ----------- */
+	{
+		SpuInit();
+		static char table[SPU_MALLOC_RECSIZ * (16 + 1)];
+		check(SpuInitMalloc(16, table) == 16, "SpuInitMalloc returns num");
+
+		long a = SpuMalloc(0x20000);			/* two "VABs" */
+		long b = SpuMalloc(0x22000);
+		check(a >= 0x1010 && (a & 15) == 0, "first block: valid aligned addr");
+		check(b >= a + 0x20000, "second block placed after the first");
+
+		/*	the defragSpuMemory pattern: close everything, re-upload larger  */
+		SpuFree((unsigned long)a);
+		SpuFree((unsigned long)b);
+		long c = SpuMalloc(0x40000);
+		check(c == a, "close-all/re-upload-all reuses the space (coalesced)");
+
+		/*	hole reuse: free the first of two, a smaller alloc drops in  */
+		long d = SpuMalloc(0x8000);
+		SpuFree((unsigned long)c);
+		long e = SpuMalloc(0x10000);
+		check(e == c, "freed hole satisfies a smaller allocation first-fit");
+
+		/*	exhaustion fails cleanly  */
+		long big = SpuMalloc(0x80000);
+		check(big == -1, "over-large allocation returns -1");
+		SpuFree((unsigned long)d);
+		SpuFree((unsigned long)e);
+		long whole = SpuMalloc(SPU_RAM_SIZE - 0x1010 - 16);
+		check(whole >= 0, "after freeing everything one huge block fits");
 	}
 
 	if (g_failures)
