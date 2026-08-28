@@ -699,6 +699,14 @@ POLY_FT4	*CActorGfx::RotateScale(POLY_FT4 *Ft4,DVECTOR &Pos,int Angle,int XScale
 MATRIX	Mtx;
 VECTOR	Scale;
 
+		// PC port: Render() hands back NULL for a blank frame (see
+		// CacheFrame), and most callers pass that straight in here.  The
+		// dereferences below wrote through address 0, which PS1 tolerated
+		// (writable kernel RAM) and Win32 faults on.  Passing NULL through
+		// matches the existing early-out one line down, which also returns
+		// Ft4 without touching it or the BBox.
+		if (!Ft4) return(0);
+
 		Angle&=4095;
 		if (Angle==0 && XScale==ONE && YScale==ONE && !Force) return(Ft4);
 

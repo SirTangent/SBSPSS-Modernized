@@ -2119,8 +2119,15 @@ void CPlayer::renderSb(DVECTOR *_pos,int _animNo,int _animFrame)
 				}
 				else
 				{
+					// PC port: Render() returns NULL for a blank frame
+					// (actor.cpp CacheFrame: "if (!CurrentFrameGfx->PAKSpr)
+					// return(0)"), and SpongeBob's anim 14 frame 22 is one of
+					// them.  Writing through that NULL was harmless on PS1 -
+					// address 0 is writable kernel RAM - but faults on Win32.
+					// Every Render() result in this function needs the guard.
 					ft4=addonGfx->Render(*_pos,addonAnimNo,_animFrame,m_facing==FACING_RIGHT?0:1);
-					setSemiTrans(ft4,trans);
+					if(ft4)
+						setSemiTrans(ft4,trans);
 				}
 			}
 		}
@@ -2142,9 +2149,12 @@ void CPlayer::renderSb(DVECTOR *_pos,int _animNo,int _animFrame)
 				else
 				{
 					ft4=addonGfx->Render(*_pos,addonAnimNo,_animFrame,m_facing==FACING_RIGHT?0:1);
-					setShadeTex(ft4,0);
-					setRGB0(ft4,255,128,255);
-					setSemiTrans(ft4,trans);
+					if(ft4)
+					{
+						setShadeTex(ft4,0);
+						setRGB0(ft4,255,128,255);
+						setSemiTrans(ft4,trans);
+					}
 				}
 			}
 		}
@@ -2166,7 +2176,8 @@ void CPlayer::renderSb(DVECTOR *_pos,int _animNo,int _animFrame)
 				else
 				{
 					ft4=addonGfx->Render(*_pos,addonAnimNo,_animFrame,m_facing==FACING_RIGHT?0:1);
-					setSemiTrans(ft4,trans);
+					if(ft4)
+						setSemiTrans(ft4,trans);
 				}
 			}
 		}
@@ -2176,7 +2187,7 @@ void CPlayer::renderSb(DVECTOR *_pos,int _animNo,int _animFrame)
 	ft4=m_actorGfx->Render(*_pos,_animNo,_animFrame,m_facing==FACING_RIGHT?0:1);
 	CThing	*platform;
 	platform=isOnPlatform();
-	if(!isDead())
+	if(ft4&&!isDead())
 	{
 		if(platform)
 		{
@@ -2186,7 +2197,8 @@ void CPlayer::renderSb(DVECTOR *_pos,int _animNo,int _animFrame)
 			}
 		}
 	}
-	setSemiTrans(ft4,trans);
+	if(ft4)
+		setSemiTrans(ft4,trans);
 
 
 	// Pants?

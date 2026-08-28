@@ -165,6 +165,36 @@ only the headers that cannot work on x86:
     `D=3, R=4`.  Both console territory arms are untouched - verified by
     the PSX regression build.
 
+19. **Blank-frame null dereferences in the render paths** (`gfx/actor.cpp`,
+    `player/player.cpp`, `enemy/ndogfish.cpp`, `enemy/ndustdev.cpp`,
+    `enemy/nfdutch.cpp`, `enemy/nghost.cpp`, `enemy/nmjfish.cpp`) - the
+    largest instance of the entry #13/#17 class, and a genuine crash:
+    three levels segfaulted within seconds of the M4 scripted sweep.
+
+    `CActorGfx::Render` returns NULL for a *blank frame* - authored data,
+    not an error: `CacheFrame` (actor.cpp:539) does `if
+    (!CurrentFrameGfx->PAKSpr) return(0)`.  Callers then write straight
+    through the result: `setSemiTrans`/`setShadeTex`/`setRGB0` are stock
+    PSY-Q macros that dereference unconditionally, as does
+    `CActorGfx::RotateScale`.  On PS1 that wrote a byte at address 0 -
+    writable kernel RAM the game never relied on - so the bug was
+    invisible for the console's whole life; Win32 faults.
+
+    The crash found was SpongeBob's own anim 14 frame 22 in
+    `CPlayer::renderSb` (all four `Render` sites there: the mode addon,
+    the jellyfish-in-net addon, the glove addon, and SpongeBob himself).
+    Being player code it was reachable in *any* level; C2L4/C3L3/C3L4 just
+    happened to play that animation within the 600-vblank sample.
+
+    An audit of every `CActorGfx::Render` call site found 18 more
+    unguarded dereferences, 14 of which reach the prim only through
+    `RotateScale`.  Those are fixed at the callee: `RotateScale` gets an
+    `if (!Ft4) return(0);` alongside its existing no-op early-out (which
+    already returns `Ft4` without touching it or the BBox, so callers
+    tolerate the passthrough).  The remaining sites - the five enemy
+    files above - guard their direct macro writes with `if (SprFrame)`.
+    Sites that merely discard the return value were left alone.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
