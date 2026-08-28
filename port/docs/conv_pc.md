@@ -195,6 +195,27 @@ only the headers that cannot work on x86:
     files above - guard their direct macro writes with `if (SprFrame)`.
     Sites that merely discard the return value were left alone.
 
+20. **`source/gfx/prim.h` (`MAX_PRIMS`)** - the PC build doubles the prim
+    pool to 4096 entries (163,840 bytes per buffer); the console arm keeps
+    the original 2048 and is verified unchanged by the PSX regression.
+
+    Two reasons.  The PC renders a wider 3D tile window than any console
+    territory (entry #18), which raised the per-frame peak; and the budget
+    cannot be *proved* by measurement the way a fixed console target's
+    could - a played session runs ~1.4x the peak that scripted input
+    reaches (measured: C1L1 39,180 and 39,276 bytes played vs 28,516
+    scripted), so bounding it honestly would mean playing all 25 levels to
+    completion.  A partial human run of the densest level reached 72.7% of
+    the ORIGINAL budget without finishing.
+
+    The failure mode is what settles it: `CLayerTile3d::render()` writes
+    through a raw `PrimPtr` with no bound check, and `PrimDisplay`'s own
+    `ASSERT(!"PRIM OVERFLOW")` is both post-hoc and compiled out of FINAL,
+    so an overrun corrupts whatever `MemAlloc` placed after the pool,
+    silently, in the shipping variant.  80KB of insurance against an 8MB
+    arena is not a trade worth agonising over.  The shim's high-water
+    watchdog (port/psyq/gpu/gp0.cpp) remains the detector.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

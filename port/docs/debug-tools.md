@@ -241,10 +241,21 @@ $env:SBSP_PRIM_LOG = "1"
 port\build\debug\sbsp.exe --level 1-1 --no-cd-pace --pad-script "240:2000,600:0000" --exit-after 600
 ```
 
-**Prim pool** - the budget is `MAX_PRIMS * MAX_PRIM_SIZE` = **81,920 bytes
-per buffer** (`source/gfx/prim.h`). It is a *byte* budget, not a primitive
-count, so mixed primitive sizes matter. Sweeping all 25 bootable levels
-(600 vblanks each, walking right):
+**Prim pool** - the budget is `MAX_PRIMS * MAX_PRIM_SIZE`, which the PC
+build doubles to **163,840 bytes per buffer** (`source/gfx/prim.h`,
+conv_pc.md #20; the console keeps 81,920). It is a *byte* budget, not a
+primitive count, so mixed primitive sizes matter.
+
+**Scripted input understates the real peak by ~1.4x.** Two full C1L1 play
+sessions of different lengths peaked at 39,180 and 39,276 bytes, against
+28,516 for the scripted walk - so treat every figure in the table below as
+a floor, not a bound. A partial (unfinished) human run of Chapter 4 Level 3
+reached 59,544, already above its scripted 52,308. That gap, and the fact
+that proving a real bound would mean playing all 25 levels to completion,
+is why the PC pool was doubled rather than measured further.
+
+Sweeping all 25 bootable levels (600 vblanks each, walking right), against
+the ORIGINAL 81,920-byte budget:
 
 | | level | peak | of budget |
 |---|---|---|---|
@@ -254,10 +265,11 @@ count, so mixed primitive sizes matter. Sweeping all 25 bootable levels
 | typical | most levels | 26-38 KB | 32-46% |
 | lightest | Chapter 4 Level 1 | 17,380 B | 21.2% |
 
-So the widened PC tile window (conv_pc.md #18) leaves **~36% headroom at
-the worst level** and `MAX_PRIMS` does not need raising. The 87.5% warning
-never fired. Kelp World (bonus) levels are the dense ones, as expected -
-they are the vehicle levels.
+Kelp World (bonus) levels are the dense ones, as expected - they are the
+vehicle levels. Against the doubled PC budget the worst scripted level sits
+at 31.9% and the worst measured human run at 36.3%, so the 87.5% warning
+has a wide margin. Re-measure with a *played* session, not a script, if you
+ever change what the renderer emits per frame.
 
 **Scratchpad**: C1L1 peaks at 240 B; the worst in the tree is 996 B
 (`CHAPTER06_LEVEL01`) against the 1 KB `PORT_Scratchpad`.
