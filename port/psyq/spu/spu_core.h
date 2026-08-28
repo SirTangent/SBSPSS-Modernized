@@ -5,7 +5,9 @@
 	addresses around, so no game-visible pointer ever aliases this).  The
 	voice register file mirrors what SpuSetVoiceAttr / the XM player program.
 	Unlike the GPU, this state is shared with the SDL audio thread - the
-	mixer (spu_core.cpp) owns the lock.
+	mixer (spu_core.cpp) owns the lock: every mutation of voices/RAM/master
+	volume must happen between Spu_Lock()/Spu_Unlock(), and Spu_RenderFrames
+	takes the lock itself.
 */
 #ifndef PORT_SPU_CORE_H
 #define PORT_SPU_CORE_H
@@ -17,17 +19,43 @@
 
 extern uint8_t g_spuRam[SPU_RAM_SIZE];
 
+/* envelope phases (envPhase) */
+enum
+{
+	SPU_ENV_OFF = 0,
+	SPU_ENV_ATTACK,
+	SPU_ENV_DECAY,
+	SPU_ENV_SUSTAIN,
+	SPU_ENV_RELEASE,
+};
+
 struct SpuVoiceState
 {
 	/* programmed registers */
 	uint32_t	startAddr;		/* byte address in g_spuRam (16-byte blocks) */
 	uint32_t	repeatAddr;		/* loop address (flag bit 2 rewrites it) */
-	uint16_t	pitch;			/* 0x1000 = 44100 Hz */
-	int16_t		volL, volR;		/* plain volume mode only - sweep never used */
+	uint16_t	pitch;			/* 0x1000 = 44100 Hz, hardware max 0x4000 */
+	int16_t		volL, volR;		/* 0..0x3FFF plain volume - sweep never used */
 	uint16_t	adsr1, adsr2;	/* raw hardware ADSR register halves */
+
+	/* runtime (owned by the mixer, valid only under the lock) */
+	int			envPhase;
+	int			envLevel;		/* 0..0x7FFF */
+	int			envCounter;		/* samples until the next envelope step */
+	uint32_t	curAddr;		/* current 16-byte block */
+	int			blockIdx;		/* next sample to consume, 0..27 */
+	uint32_t	pitchFrac;		/* 12-bit fractional sample position */
+	int16_t		block[28];		/* decoded current block */
+	int16_t		hist1, hist2;	/* ADPCM filter history */
+	int16_t		s0, s1, s2, s3;	/* gaussian taps, s0 newest */
+	int			endx;			/* reached a LOOP_END block since key-on */
 };
 
 extern SpuVoiceState g_spuVoice[SPU_NVOICES];
+
+/*	common (master) volume, 0x3FFF = unity - written by
+	SpuSetCommonMasterVolume under the lock  */
+extern int16_t g_spuMasterVolL, g_spuMasterVolR;
 
 /*	spu_adpcm.cpp: decode one 16-byte SPU ADPCM block into 28 PCM samples.
 	byte 0 = shift (low nibble; 13..15 act as 9) | filter (high nibble, 0..4),
@@ -41,5 +69,16 @@ void SpuAdpcm_DecodeBlock(const uint8_t *block, int16_t *out28,
 #define SPU_ADPCM_LOOP_END		1	/* jump to repeatAddr after this block */
 #define SPU_ADPCM_LOOP_REPEAT	2	/* with END: keep playing; without: mute */
 #define SPU_ADPCM_LOOP_START	4	/* set repeatAddr to this block */
+
+/*	spu_core.cpp: the mixer.  Key-on latches startAddr and restarts the
+	envelope from ATTACK; key-off enters RELEASE; a released voice frees
+	itself (envPhase -> SPU_ENV_OFF) when its envelope reaches zero.
+	Callers must hold the lock for KeyOn/KeyOff and any direct state pokes;
+	RenderFrames locks internally and renders interleaved stereo s16.  */
+void Spu_Lock(void);
+void Spu_Unlock(void);
+void Spu_KeyOn(int voice);
+void Spu_KeyOff(int voice);
+void Spu_RenderFrames(int16_t *stereoOut, int nFrames);
 
 #endif

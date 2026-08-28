@@ -201,3 +201,4 @@ sbsp_shim_test(gte_trig_test)   # exact fixed-point trig fixtures (M1)
 sbsp_shim_test(gte_test)        # software cop2 / libgte fixtures (M3)
 sbsp_shim_test(gpu_test)        # software GPU: VRAM ops, OT walker, goldens
 sbsp_shim_test(adpcm_test)      # SPU ADPCM decoder golden vectors (M5)
+sbsp_shim_test(spu_test)        # SPU voice mixer: gaussian/ADSR/pan (M5)
