@@ -216,6 +216,20 @@ only the headers that cannot work on x86:
     arena is not a trade worth agonising over.  The shim's high-water
     watchdog (port/psyq/gpu/gp0.cpp) remains the detector.
 
+## Game-source changes (M5)
+
+None.  The whole audio milestone - the software SPU (`port/psyq/spu/`),
+the XMPlayer reimplementation (`port/psyq/xmplay/`), and the SDL3 output
+path (`port/psyq/host/audio_out.cpp`) - lives entirely shim-side behind
+the vintage `LIBSPU.H`/`XMPLAY.H` prototypes.  `git diff SBSP-Win11 --
+source/ tools/` is empty for the milestone branch, so no PSX regression
+build was required.
+
+One correction of record rather than of code: issue #7's exit criterion
+mentions a mono/stereo option, but the game has none - `setStereo(true)`
+runs once at init (`source/sound/xmplay.cpp:92`) and `XM_SetMono` is
+unreachable from any UI.  The shim implements both as real state anyway.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
