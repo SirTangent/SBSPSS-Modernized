@@ -77,18 +77,27 @@ static void usage(void)
 		"See port/docs/debug-tools.md for details.\n");
 }
 
-/*	If argv[i] is "--name value" or "--name=value", return the value (and
-	advance *i past a separate value argument); NULL otherwise.  */
-static const char *argValue(const char *name, int *i, int argc, char **argv)
+/*	If argv[*i] names this option, set *matched and return its value:
+	"--name=value", or "--name value" (advancing *i past the value).
+	Returns NULL - with *matched already set, so the caller reports nothing
+	further - when the option IS present but its value is missing or is
+	itself an option.  Accepting the latter meant "--data-dir --level 1-2"
+	silently set SBSP_DATA_DIR=--level and surfaced only much later, as an
+	abort() inside CdRead.  */
+static const char *argValue(const char *name, int *i, int argc, char **argv,
+							int *matched)
 {
 	const char *a = argv[*i];
 	size_t n = strlen(name);
-	if (strncmp(a, name, n) != 0)
+
+	if (strncmp(a, name, n) != 0 || (a[n] != '\0' && a[n] != '='))
 		return NULL;
+	*matched = 1;
 	if (a[n] == '=')
 		return a + n + 1;
-	if (a[n] == '\0' && *i + 1 < argc)
+	if (*i + 1 < argc && strncmp(argv[*i + 1], "--", 2) != 0)
 		return argv[++*i];
+	fprintf(stderr, "[args] %s needs a value - ignored\n", name);
 	return NULL;
 }
 
@@ -133,23 +142,20 @@ static void parseArgs(void)
 			_putenv("SBSP_PACE_LOG=1");
 			continue;
 		}
-		if ((v = argValue("--level", &i, __argc, __argv)) != NULL)
+		int matched = 0;
+		if ((v = argValue("--level", &i, __argc, __argv, &matched)) != NULL)
 		{
 			g_bootLevel = parseLevel(v);
 			if (g_bootLevel < 0)
 				fprintf(stderr, "[args] bad --level '%s' - booting normally\n", v);
-			continue;
 		}
-		int matched = 0;
-		for (int a = 0; a < (int)(sizeof(aliases) / sizeof(aliases[0])); a++)
+		for (int a = 0; !matched && a < (int)(sizeof(aliases) / sizeof(aliases[0])); a++)
 		{
-			if ((v = argValue(aliases[a].arg, &i, __argc, __argv)) != NULL)
+			if ((v = argValue(aliases[a].arg, &i, __argc, __argv, &matched)) != NULL)
 			{
 				char buf[1024];
 				snprintf(buf, sizeof(buf), "%s=%s", aliases[a].env, v);
 				_putenv(buf);
-				matched = 1;
-				break;
 			}
 		}
 		if (!matched)

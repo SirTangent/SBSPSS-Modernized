@@ -359,18 +359,24 @@ static CdlCB g_readyCallback;
 	the terminator header staged for CdGetSector.  */
 extern "C" void Port_CdVblank(void)
 {
-	if (g_xaEndIn > 0 && --g_xaEndIn == 0)
-	{
-		static u_char result[8];
-		if (g_readyCallback)
-		{
-			fprintf(stderr, "[cd] XA stream chan %d: end-of-stream delivered (audio is M6)\n",
-					g_xaFilterChan);
-			g_xaServeTerminator = 1;
-			g_readyCallback(CdlDataReady, result);
-			g_xaServeTerminator = 0;
-		}
-	}
+	static u_char	result[8];
+
+	/*	The countdown only runs while there is someone to deliver to.
+		CFmvScene clears the ready callback at both ends of a movie
+		(source/fmv/fmv.cpp:186,267), and consuming the arming into a NULL
+		callback would drop this stream's terminator for good: cdxa.cpp is
+		the only writer of XA_MODE_END, so isSpeechPlaying() would stick
+		true forever - the exact wedge this delivery exists to prevent.  */
+	if (!g_readyCallback || g_xaEndIn <= 0)
+		return;
+	if (--g_xaEndIn != 0)
+		return;
+
+	fprintf(stderr, "[cd] XA stream chan %d: end-of-stream delivered (audio is M6)\n",
+			g_xaFilterChan);
+	g_xaServeTerminator = 1;
+	g_readyCallback(CdlDataReady, result);
+	g_xaServeTerminator = 0;
 }
 
 extern "C" CdlCB CdReadCallback(CdlCB func)

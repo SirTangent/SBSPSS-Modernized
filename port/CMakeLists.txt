@@ -118,6 +118,19 @@ file(GLOB SBSP_SHIM_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/psyq/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/psyq/*/*.cpp
 )
+
+# Argument parsing is kept OUT of the shim archive and linked as objects, for
+# the same reason main.cpp is split out of the game lib above: its entire job
+# is a priority-101 constructor and it exports only Port_BootLevel, which only
+# system/main.cpp calls.  Inside a static archive the linker drops the member
+# from every executable that does not reference that one symbol - which is how
+# `sbsp_headless --data-dir <path>` came to be silently ignored.  It needs no
+# shim headers (stdio/stdlib/string only), so it carries no include set.
+list(REMOVE_ITEM SBSP_SHIM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/psyq/host/args.cpp)
+add_library(psyq_args OBJECT psyq/host/args.cpp)
+target_compile_features(psyq_args PRIVATE cxx_std_17)
+target_compile_options(psyq_args PRIVATE -Wall -g -O2)
+
 add_library(psyq_shim STATIC ${SBSP_SHIM_SOURCES})
 target_compile_features(psyq_shim PRIVATE cxx_std_17)
 target_compile_options(psyq_shim PRIVATE -Wall -g -O2 ${SBSP_PSYQ_DIRAFTER})
@@ -145,7 +158,7 @@ target_link_libraries(psyq_shim PUBLIC winmm)   # timeBeginPeriod (host/pump.cpp
 # whole-archive game lib and the shim.  WIN32 subsystem is deliberately NOT
 # set - the console carries the shim's stub/diagnostic log.
 # ---------------------------------------------------------------------------
-add_executable(sbsp $<TARGET_OBJECTS:sbsp_game_main>)
+add_executable(sbsp $<TARGET_OBJECTS:sbsp_game_main> $<TARGET_OBJECTS:psyq_args>)
 set_target_properties(sbsp PROPERTIES LINKER_LANGUAGE CXX)
 target_link_options(sbsp PRIVATE -static)
 target_link_libraries(sbsp PRIVATE
@@ -158,7 +171,7 @@ target_link_libraries(sbsp PRIVATE
 # ---------------------------------------------------------------------------
 # Headless file-I/O proof: whole-archive the game lib so EVERY game TU's
 # undefined symbols hit the linker - that is the link-completeness proof.
-add_executable(sbsp_headless tests/headless.cpp)
+add_executable(sbsp_headless tests/headless.cpp $<TARGET_OBJECTS:psyq_args>)
 sbsp_game_flavour(sbsp_headless)
 target_link_options(sbsp_headless PRIVATE -static)
 target_link_libraries(sbsp_headless PRIVATE
