@@ -230,6 +230,22 @@ mentions a mono/stereo option, but the game has none - `setStereo(true)`
 runs once at init (`source/sound/xmplay.cpp:92`) and `XM_SetMono` is
 unreachable from any UI.  The shim implements both as real state anyway.
 
+## Game-source changes (M6)
+
+None.  XA speech (`port/psyq/cd/xa_stream.cpp` + `xa_adpcm.cpp`), the
+memory card (`port/psyq/mcrd/`), and rumble (`port/psyq/host/input.cpp`)
+all live shim-side behind the vintage `LIBCD.H`/`LIBMCRD.H`/`LIBPAD.H`
+prototypes; `sound/cdxa.cpp`, `memcard/memcard.cpp` and `pad/vibe.cpp`
+run unmodified.
+
+One correction of record: issue #8's "verify the autoload path in the
+retail config" - the retail game does not autoload.  `DoAutoLoad`
+(`source/system/main.cpp:110`) exists but its call site is commented out
+upstream ("Autoload? Who wants that in this day and age!?"), in the
+`__USER_CDBUILD__` block too.  Retail behaviour is kept; the shipped
+persistence surface (frontend Load Game + in-game save) is what the M6
+exit criterion verifies.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

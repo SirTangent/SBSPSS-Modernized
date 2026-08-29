@@ -24,6 +24,13 @@ Run from the **repo root**: the CD path is relative
 has been built - so the FINAL exe needs `SBSP_DATA_DIR` (see §4) or it exits 3
 at `CdInit`.
 
+The data build (`port\build-data.cmd`) also stages `TRACK1.IXA` (the XA
+speech stream, M6) next to `BIGLUMP.BIN`, copied from
+`data/CDData/Track1.Ixa` - a Git-LFS file, so a fresh clone needs
+`git lfs pull` first (the build errors out on an unmaterialised pointer).
+Speech plays silence-free only when the file is present; a missing file
+prints `[xa] CdlReadS but TRACK1.IXA is absent` on the first speech line.
+
 
 ## 2. In-game keys (DEBUG only)
 
@@ -57,7 +64,7 @@ jumps straight to `GameScene` (the same shape as the vintage
 The remaining arguments are aliases for the environment variables in §4 -
 same names without the prefix: `--data-dir`, `--pad-script`,
 `--dump-frames`, `--dump-dir`, `--exit-after`, `--dump-audio`,
-`--no-cd-pace`, `--no-audio`, and `--pace-log` (§6).  Both `--flag value`
+`--save-dir`, `--no-cd-pace`, `--no-audio`, and `--pace-log` (§6).  Both `--flag value`
 and `--flag=value` work; an argument overrides an inherited env var.
 Unknown arguments warn and are ignored.
 
@@ -77,7 +84,9 @@ All optional, all read once at startup.
 | `SBSP_DUMP_DIR` | Where those BMPs go (default `.`). Files are `sbsp_frame_<vblank>.bmp`. |
 | `SBSP_EXIT_AFTER` | Clean `exit(0)` at that vblank. The game's `MainLoop` has no exit path of its own, so scripted runs need this. |
 | `SBSP_PRIM_LOG` | Print the prim-pool high-water mark each time it rises (§6). Use it to measure headroom against `MAX_PRIMS` after any change that adds primitives per frame. |
-| `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). |
+| `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). **XA speech is unaffected**: it is real-time audio and stays clocked at 150 sectors/s of emulated time regardless. |
+| `SBSP_SAVE_DIR` | (M6) Where the memory card lives. Default `%APPDATA%\SBSPSS`; the card is a single standard 128KB image `card0.mcd` that DuckStation's memory-card editor opens natively (import/export real PS1 saves by dropping a file in either direction). Created formatted on first use. |
+| `SBSP_XA_LOG=1` | (M6) Trace XA speech streaming on stderr: stream start (sector + channel), terminator deliveries, pauses. Off by default - a clean run prints no `[xa]` lines. |
 | `SBSP_DUMP_AUDIO` | (M5) Write the SPU mixer output to this WAV path instead of opening a playback device: exactly `44100/hz` frames per emulated vblank, rendered after that vblank's `XM_Update`. Works headless and with no sound device. Two identical runs produce **bit-identical audio modulo a ±1-vblank start offset** (window bring-up races the wall-clock vblank counter) - compare runs aligned at the first non-zero sample, not by raw file hash. Never combine with real playback: each render advances the mixer, so two consumers would each get half the samples (which is why the device is disabled in dump mode). |
 | `SBSP_NO_AUDIO=1` | Skip the audio device entirely (no dump either). The SPU/XM machinery still runs. |
 
@@ -180,8 +189,14 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
   `SpuSetVoiceAttr` mask bits.
 - `[xm]` (M5) - XMPlayer anomalies: bad PXM/VH data, slot exhaustion,
   an XM effect outside the implemented (XMPLAY.LIB) set, the deferred
-  looping-sample path being reached.  A clean run prints **neither**
-  `[spu]` nor `[xm]` lines.
+  looping-sample path being reached.
+- `[xa]` (M6) - XA speech anomalies: TRACK1.IXA missing, an out-of-range
+  `CdlReadS`, an unsupported coding byte, a short read.  With
+  `SBSP_XA_LOG=1` it also traces stream start/pause/terminators.
+- `[mcrd]` (M6) - memory-card anomalies: an unwritable save location, a
+  short/corrupt `card0.mcd` (recreated), plus one line when the image is
+  first created.  A clean run prints **none** of `[spu]` `[xm]` `[xa]`
+  `[mcrd]` lines.
 - `[gpu] prim pool high-water N/M bytes` (with `SBSP_PRIM_LOG=1`) - the
   peak bytes used in one prim buffer, sampled in `DrawOTag`, i.e. at the
   exact peak of a frame's fill. **A `[gpu] WARNING: prim pool ...` line
@@ -207,7 +222,7 @@ debugger.
 
 ## 7. Unit tests
 
-Seven self-contained exes per variant in `port\build\<variant>\`; each exits 0
+Ten self-contained exes per variant in `port\build\<variant>\`; each exits 0
 on pass and prints its own failures:
 
 | Exe | Covers |
@@ -218,13 +233,16 @@ on pass and prints its own failures:
 | `adpcm_test.exe` | (M5) SPU ADPCM decoder golden vectors: filters, shift rules, clamping, history |
 | `spu_test.exe` | (M5) voice mixer properties (pan, pitch, ADSR release, one-shot mute), the libspu API, SpuMalloc fragmentation incl. the VAB-swap pattern |
 | `xm_test.exe` | (M5) parses the real PXMs and cross-checks **every pattern** against the pristine `.xm` files beside them; VAB upload byte-exactness; then plays the title theme + a one-shot SFX end-to-end through the mixer (run from the repo root or it skips) |
+| `xa_test.exe` | (M6) XA-ADPCM decoder: hand vectors, a cross-oracle against the SPU decoder on the same nibble stream, and real `Track1.Ixa` sectors bit-exact vs an ffmpeg golden (regenerate: `py port/tests/make_xa_fixture.py`); then the stream engine over a synthetic disc (cadence, filter routing, terminators, pause/resume, the FMV callback hold) and the mixer's CD slice (run from the repo root or the real-data layer skips) |
+| `mcrd_test.exe` | (M6) card-image FS (DuckStation-shaped image, chains, delete/reuse, capacity, format/unformat) + the libmcrd Sync-latch protocol; uses `SBSP_SAVE_DIR=./mcrd_test_tmp`, never a real card |
+| `pad_test.exe` | (M6, issue #21) SDL3 virtual gamepad: hotplug, the full button mapping, the >8192 trigger threshold, stick byte conversion, and rumble end to end (motor bytes -> the virtual device's rumble callback) |
 | `sbsp_headless.exe` | no window: dumps the 245-entry FAT, loads real lumps, CRCs them |
 
 Run all for both variants before any commit:
 
 ```powershell
 foreach ($v in 'debug','final') { foreach ($t in 'gte_trig_test','gte_test','gpu_test',
-    'adpcm_test','spu_test','xm_test') {
+    'adpcm_test','spu_test','xm_test','xa_test','mcrd_test','pad_test') {
   & "port\build\$v\$t.exe"; "$v/$t -> $LASTEXITCODE" } }
 $env:SBSP_DATA_DIR = "out/USA/DEBUG/version/CD"
 port\build\final\sbsp_headless.exe
