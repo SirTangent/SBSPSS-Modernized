@@ -56,10 +56,10 @@ jumps straight to `GameScene` (the same shape as the vintage
 
 The remaining arguments are aliases for the environment variables in §4 -
 same names without the prefix: `--data-dir`, `--pad-script`,
-`--dump-frames`, `--dump-dir`, `--exit-after`, `--no-cd-pace`, and
-`--pace-log` (§6).  Both `--flag value` and `--flag=value` work; an
-argument overrides an inherited env var.  Unknown arguments warn and are
-ignored.
+`--dump-frames`, `--dump-dir`, `--exit-after`, `--dump-audio`,
+`--no-cd-pace`, `--no-audio`, and `--pace-log` (§6).  Both `--flag value`
+and `--flag=value` work; an argument overrides an inherited env var.
+Unknown arguments warn and are ignored.
 
 Implementation: `port/psyq/host/args.cpp` (parsed before any static
 initialiser consumes its configuration) + the `Port_BootLevel` hook in
@@ -78,6 +78,8 @@ All optional, all read once at startup.
 | `SBSP_EXIT_AFTER` | Clean `exit(0)` at that vblank. The game's `MainLoop` has no exit path of its own, so scripted runs need this. |
 | `SBSP_PRIM_LOG` | Print the prim-pool high-water mark each time it rises (§6). Use it to measure headroom against `MAX_PRIMS` after any change that adds primitives per frame. |
 | `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). |
+| `SBSP_DUMP_AUDIO` | (M5) Write the SPU mixer output to this WAV path instead of opening a playback device: exactly `44100/hz` frames per emulated vblank, rendered after that vblank's `XM_Update`. Works headless and with no sound device. Two identical runs produce **bit-identical audio modulo a ±1-vblank start offset** (window bring-up races the wall-clock vblank counter) - compare runs aligned at the first non-zero sample, not by raw file hash. Never combine with real playback: each render advances the mixer, so two consumers would each get half the samples (which is why the device is disabled in dump mode). |
+| `SBSP_NO_AUDIO=1` | Skip the audio device entirely (no dump either). The SPU/XM machinery still runs. |
 
 The frame dumps read emulated VRAM directly, so they work **even if Vulkan
 fails to initialise** - that is the point of them. They capture the DISPENV
@@ -173,6 +175,13 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
 - `[gte] ...`, `[input] gamepad connected: ...`,
   `[input] SBSP_PAD_SCRIPT: N entries`, `[host] wrote ....bmp`,
   `[args] boot level: ...`, `[cd] XA stream chan N: end-of-stream ...`.
+- `[spu]` (M5) - software-SPU anomalies: SpuMalloc exhaustion/table-full,
+  out-of-range transfers, an out-of-range voice number, unimplemented
+  `SpuSetVoiceAttr` mask bits.
+- `[xm]` (M5) - XMPlayer anomalies: bad PXM/VH data, slot exhaustion,
+  an XM effect outside the implemented (XMPLAY.LIB) set, the deferred
+  looping-sample path being reached.  A clean run prints **neither**
+  `[spu]` nor `[xm]` lines.
 - `[gpu] prim pool high-water N/M bytes` (with `SBSP_PRIM_LOG=1`) - the
   peak bytes used in one prim buffer, sampled in `DrawOTag`, i.e. at the
   exact peak of a frame's fill. **A `[gpu] WARNING: prim pool ...` line
@@ -198,7 +207,7 @@ debugger.
 
 ## 7. Unit tests
 
-Four self-contained exes per variant in `port\build\<variant>\`; each exits 0
+Seven self-contained exes per variant in `port\build\<variant>\`; each exits 0
 on pass and prints its own failures:
 
 | Exe | Covers |
@@ -206,12 +215,16 @@ on pass and prints its own failures:
 | `gte_trig_test.exe` | exact fixed-point `rsin`/`rcos`/`ratan2`/`SquareRoot0` fixtures |
 | `gte_test.exe` | software cop2 + libgte fixtures (RTPS/RTPT/NCLIP/MVMVA/AVSZ/UNR division, FLAG bits) |
 | `gpu_test.exe` | VRAM rect ops, OT walker shape, rasterizer goldens, polyline terminator cases |
+| `adpcm_test.exe` | (M5) SPU ADPCM decoder golden vectors: filters, shift rules, clamping, history |
+| `spu_test.exe` | (M5) voice mixer properties (pan, pitch, ADSR release, one-shot mute), the libspu API, SpuMalloc fragmentation incl. the VAB-swap pattern |
+| `xm_test.exe` | (M5) parses the real PXMs and cross-checks **every pattern** against the pristine `.xm` files beside them; VAB upload byte-exactness; then plays the title theme + a one-shot SFX end-to-end through the mixer (run from the repo root or it skips) |
 | `sbsp_headless.exe` | no window: dumps the 245-entry FAT, loads real lumps, CRCs them |
 
-Run all four for both variants before any commit:
+Run all for both variants before any commit:
 
 ```powershell
-foreach ($v in 'debug','final') { foreach ($t in 'gte_trig_test','gte_test','gpu_test') {
+foreach ($v in 'debug','final') { foreach ($t in 'gte_trig_test','gte_test','gpu_test',
+    'adpcm_test','spu_test','xm_test') {
   & "port\build\$v\$t.exe"; "$v/$t -> $LASTEXITCODE" } }
 $env:SBSP_DATA_DIR = "out/USA/DEBUG/version/CD"
 port\build\final\sbsp_headless.exe

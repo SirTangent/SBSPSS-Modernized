@@ -28,9 +28,6 @@ long DrawSync(long mode)
 	default would hang or crash the caller (found by /code-review on M1):
 */
 
-/*	spu.cpp:73 spins while(!SpuIsTransferCompleted(...)) - 1 == complete  */
-long SpuIsTransferCompleted() { PSYQ_STUB_ONCE(); return 1; }
-
 /*	fmv.cpp strNext() treats 0 as "sector ready" and dereferences the
 	never-written out-param; nonzero drains its timeout and playFMV exits
 	cleanly  */
@@ -58,56 +55,10 @@ long DecDCTout() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
-long InitXMData() { PSYQ_STUB_ONCE(); return 0; }
-long SpuInit() { PSYQ_STUB_ONCE(); return 0; }
-long SpuInitMalloc() { PSYQ_STUB_ONCE(); return 0; }
-long SpuReserveReverbWorkArea() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonAttr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonCDMix() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonCDVolume() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetCommonMasterVolume() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetEnv() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverb() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeDelayTime() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeDepth() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeFeedback() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbModeType() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetReverbVoice() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferCallback() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferMode() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetTransferStartAddr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuSetVoiceAttr() { PSYQ_STUB_ONCE(); return 0; }
-long SpuWrite0() { PSYQ_STUB_ONCE(); return 0; }
 long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
 long StFreeRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetStream() { PSYQ_STUB_ONCE(); return 0; }
 long StUnSetRing() { PSYQ_STUB_ONCE(); return 0; }
-long XM_ClearSFXRange() { PSYQ_STUB_ONCE(); return 0; }
-long XM_CloseVAB() { PSYQ_STUB_ONCE(); return 0; }
-/*	Nonzero = "this song/SFX has finished" (xmplay.cpp:208-215): the caller
-	marks the channel SILENT and XM_Quits it, freeing it for reuse.  The old
-	0 return meant "still playing" forever - channels leaked one one-shot
-	SFX at a time until playSfx() permanently returned NOT_PLAYING (~10
-	plays in).  With no audio until M5, everything finishing instantly is
-	the correct degenerate behaviour.  */
-long XM_GetFeedback() { PSYQ_STUB_ONCE(); return 1; }
-long XM_GetFileHeaderSize() { PSYQ_STUB_ONCE(); return 0; }
-long XM_GetSampleAddress() { PSYQ_STUB_ONCE(); return 0; }
-long XM_GetSongSize() { PSYQ_STUB_ONCE(); return 0; }
-long XM_Init() { PSYQ_STUB_ONCE(); return 0; }
-long XM_OnceOffInit() { PSYQ_STUB_ONCE(); return 0; }
-long XM_PlaySample() { PSYQ_STUB_ONCE(); return 0; }
-long XM_PlayStop() { PSYQ_STUB_ONCE(); return 0; }
-long XM_Quit() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetFileHeaderAddress() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetMasterPan() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetMasterVol() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetMono() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetSongAddress() { PSYQ_STUB_ONCE(); return 0; }
-long XM_SetStereo() { PSYQ_STUB_ONCE(); return 0; }
-long XM_StopSample() { PSYQ_STUB_ONCE(); return 0; }
-long XM_Update() { PSYQ_STUB_ONCE(); return 0; }
-long XM_VABInit() { PSYQ_STUB_ONCE(); return 0; }
 
 }
