@@ -232,19 +232,35 @@ unreachable from any UI.  The shim implements both as real state anyway.
 
 ## Game-source changes (M6)
 
-None.  XA speech (`port/psyq/cd/xa_stream.cpp` + `xa_adpcm.cpp`), the
-memory card (`port/psyq/mcrd/`), and rumble (`port/psyq/host/input.cpp`)
-all live shim-side behind the vintage `LIBCD.H`/`LIBMCRD.H`/`LIBPAD.H`
-prototypes; `sound/cdxa.cpp`, `memcard/memcard.cpp` and `pad/vibe.cpp`
-run unmodified.
+The milestone's machinery is all shim-side - XA speech
+(`port/psyq/cd/xa_stream.cpp` + `xa_adpcm.cpp`), the memory card
+(`port/psyq/mcrd/`), and rumble (`port/psyq/host/input.cpp`) live behind
+the vintage `LIBCD.H`/`LIBMCRD.H`/`LIBPAD.H` prototypes; `sound/cdxa.cpp`,
+`memcard/memcard.cpp` and `pad/vibe.cpp` run unmodified.  One deliberate
+behavioural divergence was added on user request:
 
-One correction of record: issue #8's "verify the autoload path in the
-retail config" - the retail game does not autoload.  `DoAutoLoad`
-(`source/system/main.cpp:110`) exists but its call site is commented out
-upstream ("Autoload? Who wants that in this day and age!?"), in the
-`__USER_CDBUILD__` block too.  Retail behaviour is kept; the shipped
-persistence surface (frontend Load Game + in-game save) is what the M6
-exit criterion verifies.
+21. **`source/system/main.cpp` (boot-time card autoload)** - a new
+    `DoAutoLoadPC()` gated `#if !defined(PSX_MIPS_ASM)` (the entry #16
+    pattern: the PlayStation build compiles it away and keeps retail
+    behaviour), called from the spot where the original autoload sits
+    commented out.  Context: the retail game NEVER autoloads -
+    `DoAutoLoad` exists but its call site is commented out upstream
+    ("Autoload? Who wants that in this day and age!?"), so after every
+    launch the slot-select screen shows EMPTY until a manual Options ->
+    Load Game.  On PC that reads as "my save is gone".  The retail
+    autoload path would not fix it even if re-enabled: `startAutoload`'s
+    completion calls `restoreData(settings-only)` and waits a fixed 2s
+    for a physical card.  `DoAutoLoadPC` instead polls the card to
+    `CS_ValidCard` (the shim card settles in a handful of frames; a
+    120-frame cap covers an unusable save location) and drives the
+    ordinary `startLoad(0)` path, whose completion restores settings AND
+    game slots after the MD5 check.  A missing/empty/unformatted card
+    falls through silently - the in-game screens keep owning every error
+    path, and Load Game/save UI are otherwise unchanged.  The card
+    location follows the usual resolution (`--save-dir`/`SBSP_SAVE_DIR`,
+    else `%APPDATA%\SBSPSS`).  Boot cost: ~10 emulated vblanks with the
+    shim card (pad-script note in debug-tools.md par. 5).  PSX regression
+    build re-run clean after the change.
 
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 

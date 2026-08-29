@@ -85,7 +85,7 @@ All optional, all read once at startup.
 | `SBSP_EXIT_AFTER` | Clean `exit(0)` at that vblank. The game's `MainLoop` has no exit path of its own, so scripted runs need this. |
 | `SBSP_PRIM_LOG` | Print the prim-pool high-water mark each time it rises (§6). Use it to measure headroom against `MAX_PRIMS` after any change that adds primitives per frame. |
 | `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). **XA speech is unaffected**: it is real-time audio and stays clocked at 150 sectors/s of emulated time regardless. |
-| `SBSP_SAVE_DIR` | (M6) Where the memory card lives. Default `%APPDATA%\SBSPSS`; the card is a single standard 128KB image `card0.mcd` that DuckStation's memory-card editor opens natively (import/export real PS1 saves by dropping a file in either direction). Created formatted on first use. |
+| `SBSP_SAVE_DIR` | (M6) Where the memory card lives. Default `%APPDATA%\SBSPSS`; the card is a single standard 128KB image `card0.mcd` that DuckStation's memory-card editor opens natively (import/export real PS1 saves by dropping a file in either direction). Created formatted on first use. **The PC build fully loads this card at boot** (settings + game slots - conv_pc.md entry #21), so the slot-select screen shows saved games without a manual Options -> Load Game; the PlayStation build keeps the retail no-autoload behaviour. |
 | `SBSP_XA_LOG=1` | (M6) Trace XA speech streaming on stderr: stream start (sector + channel), terminator deliveries, pauses. Off by default - a clean run prints no `[xa]` lines. |
 | `SBSP_DUMP_AUDIO` | (M5) Write the SPU mixer output to this WAV path instead of opening a playback device: exactly `44100/hz` frames per emulated vblank, rendered after that vblank's `XM_Update`. Works headless and with no sound device. Two identical runs produce **bit-identical audio modulo a ±1-vblank start offset** (window bring-up races the wall-clock vblank counter) - compare runs aligned at the first non-zero sample, not by raw file hash. Never combine with real playback: each render advances the mixer, so two consumers would each get half the samples (which is why the device is disabled in dump mode). |
 | `SBSP_NO_AUDIO=1` | Skip the audio device entirely (no dump either). The SPU/XM machinery still runs. |
@@ -160,6 +160,17 @@ for ($n = 0; $n -lt 26; $n++) {
 $env:SBSP_PAD_SCRIPT = ($e -join ",")
 port\build\debug\sbsp.exe --exit-after 6600
 ```
+
+**The M6 boot autoload shifts script timing.**  The card scan/load at boot
+consumes emulated vblanks before the title appears, which can push a
+fixed-vblank script off its alternation parity - a missed press costs one
+full 440-vblank START/CROSS cycle (measured: the map arrives 2 taps later
+than it did pre-autoload).  Point `--save-dir` at a throwaway directory for
+scripted runs so the shift is at least constant (an empty fresh card), and
+re-time any script that keys tightly off absolute vblanks.  Waypoints with
+an empty card: map at ~3300-3500 after 12 route taps; on the map, TRIANGLE
+opens the save scene (confirm dialogs default to NO - Down then Cross for
+YES).
 
 Scene transitions are printed by the game itself on stdout
 (`GameState: Opening new scene '...'`), which is the cheapest way to see

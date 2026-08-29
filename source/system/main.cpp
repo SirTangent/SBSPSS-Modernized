@@ -126,6 +126,47 @@ static void DoAutoLoad()
 	MemCard::Stop();
 }
 
+#if	!defined(PSX_MIPS_ASM)
+/*	PC port: boot-time FULL load of the memory card (settings AND game
+	slots), so the slot-select screen shows saved games without a manual
+	Options -> Load Game every launch.  The retail autoload path above is
+	no use for that even if re-enabled: startAutoload's completion calls
+	restoreData(settings-only) and it waits a fixed 2 seconds for a
+	physical card to settle.  This variant polls the card to ValidCard
+	(the shim's card settles in a handful of frames; the 120-frame cap
+	covers an unusable save location) and drives the ordinary startLoad
+	path, whose completion restores everything after the MD5 check.
+	A missing/empty/unformatted card just falls through - no UI, no
+	format offer; the in-game screens still own the error paths.  */
+static void DoAutoLoadPC()
+{
+	MemCard::Start();
+	CSaveLoadDatabase	autoloadDb;
+	int					frames;
+
+	for(frames=0;frames<120;frames++)
+	{
+		autoloadDb.think();
+		if(MemCard::GetCardStatus(0)==MemCard::CS_ValidCard)
+			break;
+		VSync(0);
+	}
+
+	if(MemCard::GetCardStatus(0)==MemCard::CS_ValidCard&&
+	   MemCard::GetFileCountOnCard(0)&&
+	   autoloadDb.startLoad(0))
+	{
+		while(autoloadDb.getLoadStatus()==CSaveLoadDatabase::IN_PROGRESS)
+		{
+			autoloadDb.think();
+			VSync(0);
+		}
+	}
+
+	MemCard::Stop();
+}
+#endif
+
 /*****************************************************************************/
 void	InitSystem()	// reordered to reduce black screen (hope all is well
 {
@@ -176,6 +217,13 @@ void	InitSystem()	// reordered to reduce black screen (hope all is well
 //#if defined(__USER_paul__) || defined(__USER_CDBUILD__)
 //	DoAutoLoad();
 //#endif
+
+	/*	PC port only (the PlayStation build defines PSX_MIPS_ASM and keeps
+		the retail no-autoload behaviour above): load card0.mcd from
+		SBSP_SAVE_DIR / %APPDATA%\SBSPSS at boot - see DoAutoLoadPC.  */
+#if	!defined(PSX_MIPS_ASM)
+	DoAutoLoadPC();
+#endif
 
 #if defined(__DEBUG_MEM__)
 	DebugMemFontInit();
