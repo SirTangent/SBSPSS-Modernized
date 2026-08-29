@@ -40,16 +40,19 @@ struct VirtFile
 	long		startLBA;
 	long		sizeBytes;		/* 0 if the host file is absent */
 	FILE		*fp;
+	int			bytesPerSector;	/* 2048 data; 2336 for the raw-XA TRACK1.IXA
+								   (8-byte subheader + 2328 data per sector,
+								   no sync/header - see xa_stream.cpp) */
 };
 
 static VirtFile g_files[] =
 {
-	{ "BIGLUMP.BIN", 0, 0, NULL },
-	{ "TRACK1.IXA",  0, 0, NULL },
-	{ "THQ.STR",     0, 0, NULL },
-	{ "CLIMAX.STR",  0, 0, NULL },
-	{ "INTRO.STR",   0, 0, NULL },
-	{ "DEMO.STR",    0, 0, NULL },
+	{ "BIGLUMP.BIN", 0, 0, NULL, 2048 },
+	{ "TRACK1.IXA",  0, 0, NULL, 2336 },
+	{ "THQ.STR",     0, 0, NULL, 2048 },
+	{ "CLIMAX.STR",  0, 0, NULL, 2048 },
+	{ "INTRO.STR",   0, 0, NULL, 2048 },
+	{ "DEMO.STR",    0, 0, NULL, 2048 },
 };
 static const int	g_fileCount = sizeof(g_files) / sizeof(g_files[0]);
 static const int	SECTOR = 2048;
@@ -98,7 +101,8 @@ static void cdBuildDir(void)
 		g_files[i].fp        = f;
 		g_files[i].sizeBytes = size;
 		g_files[i].startLBA  = lba;
-		long sectors = (size + SECTOR - 1) / SECTOR;
+		long bps     = g_files[i].bytesPerSector;
+		long sectors = (size + bps - 1) / bps;
 		if (sectors < 16) sectors = 16;			/* keep ranges distinct */
 		lba += (sectors + 15) & ~15;			/* 16-sector aligned */
 	}
@@ -115,7 +119,8 @@ static VirtFile *fileForLBA(long lba)
 {
 	for (int i = 0; i < g_fileCount; i++)
 	{
-		long sectors = (g_files[i].sizeBytes + SECTOR - 1) / SECTOR;
+		long bps     = g_files[i].bytesPerSector;
+		long sectors = (g_files[i].sizeBytes + bps - 1) / bps;
 		if (lba >= g_files[i].startLBA && lba < g_files[i].startLBA + sectors)
 			return &g_files[i];
 	}
@@ -246,6 +251,15 @@ extern "C" int CdRead(int sectors, u_long *buf, int mode)
 	while (sectors > 0)
 	{
 		VirtFile *vf = fileForLBA(g_curLBA);
+		if (vf && vf->bytesPerSector != SECTOR)
+		{
+			/*	CdRead is the 2048-byte data path; landing in the raw-XA
+				range means a broken position, not a recoverable read  */
+			fprintf(stderr, "[shim] CdRead: LBA %ld is inside %s (raw XA, "
+							"%d-byte sectors) - data reads cannot go there\n",
+					g_curLBA, vf->name, vf->bytesPerSector);
+			abort();
+		}
 		if (!vf || !vf->fp)
 		{
 			/*	Success + zeros here would defeat the callers' entire error

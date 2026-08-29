@@ -26,4 +26,19 @@ make -r -f makefile.gfx \
     MKDIR=mkdir ECHO=echo MV=mv DATE=date SED=sed \
     RMDIR=rmdir LS=ls "ATTRIB=chmod +w"
 
+# Stage the XA speech stream next to BIGLUMP.BIN (M6) - on PSX this is
+# makefile.gaz's cddata rule copying it into the CD image. Guard against an
+# unmaterialised Git-LFS pointer file (a few hundred bytes, not ~127MB).
+IXA_SRC="data/CDData/Track1.Ixa"
+IXA_DST="out/$TERRITORY/$VERSION/version/CD/TRACK1.IXA"
+if [ ! -f "$IXA_SRC" ] || [ "$(stat -c%s "$IXA_SRC")" -lt 1048576 ]; then
+    echo "ERROR: $IXA_SRC is missing or is an unmaterialised Git-LFS pointer." >&2
+    echo "       Run: git lfs pull" >&2
+    exit 1
+fi
+if [ ! -f "$IXA_DST" ] || [ "$IXA_SRC" -nt "$IXA_DST" ]; then
+    cp "$IXA_SRC" "$IXA_DST"
+    echo "Staged $IXA_DST"
+fi
+
 echo "Data build complete: out/$TERRITORY"
