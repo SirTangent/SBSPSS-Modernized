@@ -24,6 +24,8 @@
 	  --exit-after <n>      SBSP_EXIT_AFTER
 	  --dump-audio <wav>    SBSP_DUMP_AUDIO (M5: deterministic mixer dump,
 	                        disables the playback device)
+	  --save-dir <path>     SBSP_SAVE_DIR (M6: memory-card image directory,
+	                        default %APPDATA%\SBSPSS)
 	  --no-cd-pace          SBSP_CD_PACE=0
 	  --no-audio            SBSP_NO_AUDIO=1
 	  --pace-log            SBSP_PACE_LOG=1
@@ -76,6 +78,7 @@ static void usage(void)
 		"  --dump-dir <path>     where dumps go           (SBSP_DUMP_DIR)\n"
 		"  --exit-after <n>      clean exit at vblank n   (SBSP_EXIT_AFTER)\n"
 		"  --dump-audio <wav>    mixer audio to WAV       (SBSP_DUMP_AUDIO)\n"
+		"  --save-dir <path>     memory-card directory    (SBSP_SAVE_DIR)\n"
 		"  --no-cd-pace          instant loads            (SBSP_CD_PACE=0)\n"
 		"  --no-audio            no playback device       (SBSP_NO_AUDIO=1)\n"
 		"  --pace-log            frame-pacing stderr log  (SBSP_PACE_LOG=1)\n"
@@ -120,6 +123,7 @@ static void parseArgs(void)
 		{ "--dump-dir",    "SBSP_DUMP_DIR"    },
 		{ "--exit-after",  "SBSP_EXIT_AFTER"  },
 		{ "--dump-audio",  "SBSP_DUMP_AUDIO"  },
+		{ "--save-dir",    "SBSP_SAVE_DIR"    },
 	};
 
 	const char *e = getenv("SBSP_BOOT_LEVEL");
