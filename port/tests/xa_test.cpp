@@ -238,8 +238,14 @@ static void streamEngineTests(void)
 	CdControlF(CdlPause, 0);
 	CdReadyCallback(NULL);
 
+	/*	the virtual disc holds TRACK1.IXA open - rebuild against an empty
+		dir to release the handle, or the remove below silently fails and
+		leaves xa_test_tmp behind  */
+	_putenv("SBSP_DATA_DIR=xa_test_tmp\\gone");
+	Port_CdRebuildDirForTest();
+	XaStream_ResetForTest();
 	remove("xa_test_tmp\\TRACK1.IXA");
-	_rmdir("xa_test_tmp");
+	check(_rmdir("xa_test_tmp") == 0, "synthetic disc cleaned up");
 }
 
 /*****************************************************************************/
