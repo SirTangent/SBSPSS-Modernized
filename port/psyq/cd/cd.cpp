@@ -25,6 +25,8 @@
 
 #include "stub_log.h"
 #include "host/pump.h"
+#include "cd/xa_stream.h"
+#include "spu/spu_core.h"
 
 #include "system/types.h"
 #include "system/asmport.h"		/* PORT_Scratchpad */
@@ -61,18 +63,6 @@ static int		g_inited;
 static long		g_curLBA;
 static double	g_readDeadline;	/* CD pacing: when the in-flight read "completes" */
 static int		g_pace = -1;	/* -1 unparsed; SBSP_CD_PACE=0 disables */
-
-/*	XA streaming (M4 degree: end-immediately).  Real sector delivery is M6;
-	until then an armed CdlReadS answers with ONE fabricated terminator
-	header so CXAStream reaches XA_MODE_END instead of pinning
-	isSpeechPlaying() true forever (which wedges GameOverScene's
-	speech-before-exit state and permanently ducks the mixer).
-	XACDReadyCallback (cdxa.cpp:53-91) ends the stream on CdlDataReady when
-	sector word 3 carries ID 352 ("video terminator") and the filter's
-	channel in bits 10-14 of the high halfword.  */
-static int		g_xaFilterChan = -1;	/* last CdlSetfilter chan (param[1]) */
-static int		g_xaEndIn;				/* vblanks until the terminator fires */
-static int		g_xaServeTerminator;	/* CdGetSector serves the header now */
 
 static void dataPath(char *dst, size_t dstSize, const char *name)
 {
@@ -128,6 +118,21 @@ static VirtFile *fileForLBA(long lba)
 }
 
 namespace { struct CdBoot { CdBoot() { cdBuildDir(); g_inited = 1; } }; static CdBoot g_cdBoot; }
+
+/*	Test support (xa_test): the CdBoot constructor resolves SBSP_DATA_DIR
+	before main() runs, so a test that stages its own synthetic disc needs a
+	way to re-scan after _putenv.  */
+extern "C" void Port_CdRebuildDirForTest(void)
+{
+	for (int i = 0; i < g_fileCount; i++)
+	{
+		if (g_files[i].fp)
+			fclose(g_files[i].fp);
+		g_files[i].fp = NULL;
+	}
+	cdBuildDir();
+	g_inited = 1;
+}
 
 /*****************************************************************************/
 /*	BCD conversion: use the SDK's own itob/btoi macros from LIBCD.H  */
@@ -217,19 +222,23 @@ extern "C" int CdControlB(u_char com, u_char *param, u_char *result)
 		g_curLBA = CdPosToInt((CdlLOC *)param);
 		return 1;
 	case CdlSetmode:
-	case CdlNop:
+		XaStream_SetMode(param ? param[0] : 0);
+		return 1;
 	case CdlPause:
+		XaStream_Pause();		/* only the XA stream has a motion to stop */
+		return 1;
+	case CdlNop:
 	case CdlMute:
 	case CdlDemute:
 		return 1;
 	case CdlSetfilter:
-		g_xaFilterChan = param ? param[1] : -1;	/* CdlFILTER.chan */
+		if (param)				/* CdlFILTER: file, chan */
+			XaStream_SetFilter(param[0], param[1]);
 		return 1;
 	case CdlReadS:
-		/*	XA streaming read - arm the end-immediately terminator (see the
-			g_xa* block above).  2 vblanks lets ControlXA finish its own
-			START->PLAY transition before the callback ends the stream.  */
-		g_xaEndIn = 2;
+		/*	XA streaming read (M6): the engine walks TRACK1.IXA from this
+			position at 150 sectors/s of emulated time - see xa_stream.cpp  */
+		XaStream_ReadS((const CdlLOC *)param);
 		return 1;
 	default:
 		PSYQ_STUB_ONCE();
@@ -336,21 +345,17 @@ extern "C" int CdSync(int mode, u_char *result)
 
 extern "C" int CdGetSector(void *madr, int size)
 {
-	/*	Real XA/FMV sector payloads are M6/M7.  The one thing served today is
-		the armed terminator header: word 3 = (chan<<10)<<16 | 352, exactly
-		what XACDReadyCallback's end test reads (cdxa.cpp:71-89).  */
-	uint32_t *w = (uint32_t *)madr;
-	for (int i = 0; i < size; i++)
-		w[i] = 0;
-	if (g_xaServeTerminator && size >= 4)
-		w[3] = ((uint32_t)(g_xaFilterChan & 31) << 26) | 352u;
+	/*	Serves the sector the XA engine staged for the current CdlDataReady
+		callback (Size1 layout: 4-byte header + subheader + user data), or
+		zeros outside one - FMV's CdGetSector use is M7.  */
+	XaStream_Serve((uint32_t *)madr, size);
 	return 1;
 }
 
 extern "C" int CdMix(CdlATV *vol)
 {
-	(void)vol;
-	PSYQ_STUB_ONCE();
+	if (vol)
+		Spu_SetCdAtv(vol->val0, vol->val1, vol->val2, vol->val3);
 	return 1;
 }
 
@@ -360,37 +365,25 @@ extern "C" int CdSetDebug(int level)
 	return 0;
 }
 
-/*	Callback registration is kept, not dropped: CXAStream::XACDReadyCallback
-	(cdxa.cpp:150) is the only writer of XA_MODE_END, so losing it would pin
-	isSpeechPlaying() true forever.  Until M6 routes real sector delivery
-	through the pump, the only firing is Port_CdVblank's one-shot terminator
-	(below); CdReadCallback stays registration-only (M7).  */
+/*	The ready callback is fired by the XA engine's per-vblank sector clock
+	(xa_stream.cpp Port_CdVblank) for every delivered data sector.  CFmvScene
+	clears it at both ends of a movie (source/fmv/fmv.cpp:186,267); the
+	engine holds the stream in place while it is NULL.  CdReadCallback stays
+	registration-only (M7).  */
 static CdlCB g_readCallback;
-static CdlCB g_readyCallback;
+CdlCB g_cdReadyCallback;		/* read by xa_stream.cpp */
 
-/*	Once per emulated vblank, from Port_Pump.  Counts down an armed CdlReadS
-	and delivers the fabricated end-of-stream sector: one CdlDataReady with
-	the terminator header staged for CdGetSector.  */
-extern "C" void Port_CdVblank(void)
+/*	xa_stream.cpp binds the stream file lazily through this: TRACK1.IXA's
+	host file and virtual-disc geometry (g_files[1]).  */
+int Port_CdXaTrackInfo(FILE **fp, long *startLBA, long *sectors)
 {
-	static u_char	result[8];
-
-	/*	The countdown only runs while there is someone to deliver to.
-		CFmvScene clears the ready callback at both ends of a movie
-		(source/fmv/fmv.cpp:186,267), and consuming the arming into a NULL
-		callback would drop this stream's terminator for good: cdxa.cpp is
-		the only writer of XA_MODE_END, so isSpeechPlaying() would stick
-		true forever - the exact wedge this delivery exists to prevent.  */
-	if (!g_readyCallback || g_xaEndIn <= 0)
-		return;
-	if (--g_xaEndIn != 0)
-		return;
-
-	fprintf(stderr, "[cd] XA stream chan %d: end-of-stream delivered (audio is M6)\n",
-			g_xaFilterChan);
-	g_xaServeTerminator = 1;
-	g_readyCallback(CdlDataReady, result);
-	g_xaServeTerminator = 0;
+	VirtFile *vf = &g_files[1];
+	if (!vf->fp)
+		return 0;
+	*fp       = vf->fp;
+	*startLBA = vf->startLBA;
+	*sectors  = vf->sizeBytes / vf->bytesPerSector;
+	return 1;
 }
 
 extern "C" CdlCB CdReadCallback(CdlCB func)
@@ -403,8 +396,7 @@ extern "C" CdlCB CdReadCallback(CdlCB func)
 
 extern "C" CdlCB CdReadyCallback(CdlCB func)
 {
-	CdlCB old = g_readyCallback;
-	g_readyCallback = func;
-	PSYQ_STUB_ONCE();	/* registered but not yet fired (M6) */
+	CdlCB old = g_cdReadyCallback;
+	g_cdReadyCallback = func;
 	return old;
 }

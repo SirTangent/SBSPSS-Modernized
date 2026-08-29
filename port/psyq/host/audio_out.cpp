@@ -121,7 +121,14 @@ extern "C" void Host_EnsureAudio(void)
 extern "C" void Port_AudioVBlank(int vblankHz)
 {
 	if (!g_wavOpen)
+	{
+		/*	no consumer at all (--no-audio, or no device): nothing renders,
+			so the XA feeder's CD-input ring would back up and log an
+			overflow ~1.7s into any speech line.  Keep it drained.  */
+		if (!g_stream)
+			Spu_CdInClear();
 		return;
+	}
 	static int16_t buf[882 * 2];		/* 44100/50 is the larger case */
 	int frames = 44100 / (vblankHz > 0 ? vblankHz : 60);
 	if (frames > 882)
