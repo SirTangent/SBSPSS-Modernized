@@ -205,3 +205,6 @@ sbsp_shim_test(gpu_test)        # software GPU: VRAM ops, OT walker, goldens
 sbsp_shim_test(adpcm_test)      # SPU ADPCM decoder golden vectors (M5)
 sbsp_shim_test(spu_test)        # SPU voice mixer: gaussian/ADSR/pan (M5)
 sbsp_shim_test(xm_test)         # XMPlayer: PXM parse vs .xm, VAB upload (M5)
+sbsp_shim_test(pad_test)        # SDL virtual gamepad: mapping + rumble (M6, #21)
+sbsp_shim_test(mcrd_test)       # memory-card image FS + libmcrd protocol (M6)
+sbsp_shim_test(xa_test)         # XA-ADPCM decoder + stream engine (M6)

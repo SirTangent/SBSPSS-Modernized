@@ -230,6 +230,50 @@ mentions a mono/stereo option, but the game has none - `setStereo(true)`
 runs once at init (`source/sound/xmplay.cpp:92`) and `XM_SetMono` is
 unreachable from any UI.  The shim implements both as real state anyway.
 
+## Game-source changes (M6)
+
+The milestone's machinery is all shim-side - XA speech
+(`port/psyq/cd/xa_stream.cpp` + `xa_adpcm.cpp`), the memory card
+(`port/psyq/mcrd/`), and rumble (`port/psyq/host/input.cpp`) live behind
+the vintage `LIBCD.H`/`LIBMCRD.H`/`LIBPAD.H` prototypes; `sound/cdxa.cpp`,
+`memcard/memcard.cpp` and `pad/vibe.cpp` run unmodified.  One deliberate
+behavioural divergence was added on user request:
+
+21. **`source/system/main.cpp` (boot-time card autoload)** - a new
+    `DoAutoLoadPC()` gated `#if !defined(PSX_MIPS_ASM)` (the entry #16
+    pattern: the PlayStation build compiles it away and keeps retail
+    behaviour), called from the spot where the original autoload sits
+    commented out.  Context: the retail game NEVER autoloads -
+    `DoAutoLoad` exists but its call site is commented out upstream
+    ("Autoload? Who wants that in this day and age!?"), so after every
+    launch the slot-select screen shows EMPTY until a manual Options ->
+    Load Game.  On PC that reads as "my save is gone".  The retail
+    autoload path would not fix it even if re-enabled: `startAutoload`'s
+    completion calls `restoreData(settings-only)` and waits a fixed 2s
+    for a physical card.  `DoAutoLoadPC` instead polls the card to
+    `CS_ValidCard` (the shim card settles in a handful of frames; a
+    120-frame cap covers an unusable save location) and drives the
+    ordinary `startLoad(0)` path, whose completion restores settings AND
+    game slots after the MD5 check.  A missing/empty/unformatted card
+    falls through silently - the in-game screens keep owning every error
+    path, and Load Game/save UI are otherwise unchanged.  The card
+    location follows the usual resolution (`--save-dir`/`SBSP_SAVE_DIR`,
+    else `%APPDATA%\SBSPSS`).  Boot cost: ~10 emulated vblanks with the
+    shim card (pad-script note in debug-tools.md par. 5).  PSX regression
+    build re-run clean after the change.
+
+22. **`source/memcard/saveload.cpp` (out-of-date save)** - a save whose
+    MD5 verified but whose `m_headerId` did not match `SAVELOAD_HEADERID`
+    used to `ASSERT(!"YOUR MEMCARD SAVE IS OUT OF DATE!")` and then call
+    `restoreData()` on it regardless: a hard trap in DEBUG, and in FINAL
+    the volume / control-style / vibration / game-slot setters all fed
+    from a struct the code had just identified as a different layout.
+    The load now fails instead (the save/load UI already has a
+    load-error path).  Same latent-bug class as entry #13, and load-
+    bearing for entry #21: the boot autoload would otherwise walk into
+    it on every single launch, before any UI exists to decline.  Found
+    by the M6 code-review pass.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

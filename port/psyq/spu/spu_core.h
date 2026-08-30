@@ -57,11 +57,22 @@ extern SpuVoiceState g_spuVoice[SPU_NVOICES];
 	SpuSetCommonMasterVolume under the lock  */
 extern int16_t g_spuMasterVolL, g_spuMasterVolR;
 
-/*	CD-input bus (XA speech / FMV audio).  M5 only records the routing the
-	game programs (SpuSetCommonCDVolume/CDMix, cdxa.cpp); the feeder that
-	actually mixes decoded XA into Spu_RenderFrames is M6.  */
+/*	CD-input bus (XA speech / FMV audio).  The XA engine (cd/xa_stream.cpp)
+	pushes decoded 18.9kHz mono into a ring; Spu_RenderFrames resamples it
+	7/3 to 44.1kHz, routes it through the CdMix ATV matrix, scales by these
+	volumes (0x7FFF ~ unity) and sums it in before the master multiply.
+	Mix-off gates only the contribution - the ring is consumed either way,
+	like the hardware (the CD keeps playing whether or not the SPU mixes
+	it), so a muted stream cannot back up the ring.  */
 extern int16_t g_spuCdVolL, g_spuCdVolR;
 extern int g_spuCdMixOn;
+
+void Spu_CdInPush(const int16_t *mono, int n);	/* takes the lock itself */
+void Spu_CdInClear(void);						/* also resets the resampler */
+unsigned Spu_CdInCountForTest(void);			/* samples queued (xa_test) */
+void Spu_SetCdAtv(uint8_t v0, uint8_t v1, uint8_t v2, uint8_t v3);
+												/* CdlATV: v0 L->L, v1 L->R,
+												   v2 R->L, v3 R->R; 128=unity */
 
 /*	spu_adpcm.cpp: decode one 16-byte SPU ADPCM block into 28 PCM samples.
 	byte 0 = shift (low nibble; 13..15 act as 9) | filter (high nibble, 0..4),
