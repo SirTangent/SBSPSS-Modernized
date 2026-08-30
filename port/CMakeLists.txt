@@ -209,4 +209,5 @@ sbsp_shim_test(pad_test)        # SDL virtual gamepad: mapping + rumble (M6, #21
 sbsp_shim_test(mcrd_test)       # memory-card image FS + libmcrd protocol (M6)
 sbsp_shim_test(xa_test)
 sbsp_shim_test(mdec_test)
-sbsp_shim_test(vlc3_test)         # XA-ADPCM decoder + stream engine (M6)
+sbsp_shim_test(vlc3_test)
+sbsp_shim_test(str_test)         # XA-ADPCM decoder + stream engine (M6)

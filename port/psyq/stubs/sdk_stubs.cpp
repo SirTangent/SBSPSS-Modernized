@@ -12,9 +12,6 @@
 
 extern "C" {
 
-/*	fmv.cpp polls this streaming flag (libpress/libcd CD-interrupt path) */
-long StCdIntrFlag;
-
 /*	blocking GPU sync joins the cooperative pump like VSync/CdReadSync */
 long DrawSync(long mode)
 {
@@ -23,28 +20,7 @@ long DrawSync(long mode)
 	return 0;
 }
 
-/*	Stubs whose RETURN VALUE is part of a caller protocol - each of these is
-	polled in a loop or gates a state machine, so the generated return-0
-	default would hang or crash the caller (found by /code-review on M1):
-*/
-
-/*	fmv.cpp strNext() treats 0 as "sector ready" and dereferences the
-	never-written out-param; nonzero drains its timeout and playFMV exits
-	cleanly  */
-long StGetNext() { PSYQ_STUB_ONCE(); return 1; }
-
-/*	CdRead2 must report "streaming started" (nonzero): fmv.cpp's strKickCD
-	spins `while(CdRead2(...)==0)` with no pump, so a 0 here hard-hangs the
-	THQ FMV scene right after the Nick logo.  With 1, StGetNext's bounded
-	no-data countdown makes strNextVlc return -1 and FMV_play falls through
-	its whole decode loop - both FMV scenes skip cleanly to the main titles.
-	Real streaming lands in M7.  */
-long CdRead2() { PSYQ_STUB_ONCE(); return 1; }
-/*	DecDCT* are real (M7): psyq/mdec/mdec.cpp and psyq/mdec/vlc3.cpp  */
-long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
-long StFreeRing() { PSYQ_STUB_ONCE(); return 0; }
-long StSetRing() { PSYQ_STUB_ONCE(); return 0; }
-long StSetStream() { PSYQ_STUB_ONCE(); return 0; }
-long StUnSetRing() { PSYQ_STUB_ONCE(); return 0; }
+/*	The M7 FMV surface is real now: the St functions, CdRead2 and
+	StCdIntrFlag live in psyq/cd/str_stream.cpp, DecDCT* in psyq/mdec/.  */
 
 }

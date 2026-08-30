@@ -38,6 +38,7 @@
 
 #include "xa_stream.h"
 #include "xa_adpcm.h"
+#include "str_stream.h"
 #include "spu/spu_core.h"
 
 namespace
@@ -174,6 +175,12 @@ void XaStream_SetFilter(int file, int chan)
 	g_filterChan = chan;
 }
 
+void XaStream_GetFilter(int *file, int *chan)
+{
+	*file = g_filterFile;
+	*chan = g_filterChan;
+}
+
 void XaStream_SetMode(int mode)
 {
 	g_mode = mode;		/* 0xE8 (Speed|RT|SF|Size1) on the XA path; data
@@ -238,6 +245,11 @@ void XaStream_Serve(uint32_t *madr, int sizeWords)
 	the vblank rate: at 60Hz the accumulator delivers 2-3 sectors per call.  */
 extern "C" void Port_CdVblank(int vblankHz)
 {
+	/*	The STR engine ticks FIRST and unconditionally: the hold below
+		exists because FMV clears the ready callback, and it must not gate
+		the movie stream itself (str_stream.cpp, M7).  */
+	StrStream_Vblank(vblankHz);
+
 	if (!g_playing || !g_cdReadyCallback)
 		return;					/* callback cleared (FMV): hold in place */
 

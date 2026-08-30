@@ -26,6 +26,7 @@
 #include "stub_log.h"
 #include "host/pump.h"
 #include "cd/xa_stream.h"
+#include "cd/str_stream.h"
 #include "spu/spu_core.h"
 
 #include "system/types.h"
@@ -51,10 +52,10 @@ static VirtFile g_files[] =
 {
 	{ "BIGLUMP.BIN", 0, 0, NULL, 2048 },
 	{ "TRACK1.IXA",  0, 0, NULL, 2336 },
-	{ "THQ.STR",     0, 0, NULL, 2048 },
-	{ "CLIMAX.STR",  0, 0, NULL, 2048 },
-	{ "INTRO.STR",   0, 0, NULL, 2048 },
-	{ "DEMO.STR",    0, 0, NULL, 2048 },
+	{ "THQ.STR",     0, 0, NULL, 2336 },	/* .STRs are raw-XA sectors too */
+	{ "CLIMAX.STR",  0, 0, NULL, 2336 },	/* (measured: every one an exact */
+	{ "INTRO.STR",   0, 0, NULL, 2336 },	/*  multiple of 2336, subheaders */
+	{ "DEMO.STR",    0, 0, NULL, 2336 },	/*  at each boundary - M7) */
 };
 static const int	g_fileCount = sizeof(g_files) / sizeof(g_files[0]);
 static const int	SECTOR = 2048;
@@ -92,6 +93,10 @@ static void cdBuildDir(void)
 		g_files[i].sizeBytes = size;
 		g_files[i].startLBA  = lba;
 		long bps     = g_files[i].bytesPerSector;
+		if (f && bps == 2336 && size % bps)
+			fprintf(stderr, "[shim] %s: %ld bytes is not a whole number of "
+					"2336-byte sectors - stale or wrong file?\n",
+					g_files[i].name, size);
 		long sectors = (size + bps - 1) / bps;
 		if (sectors < 16) sectors = 16;			/* keep ranges distinct */
 		lba += (sectors + 15) & ~15;			/* 16-sector aligned */
@@ -221,11 +226,20 @@ extern "C" int CdControlB(u_char com, u_char *param, u_char *result)
 	case CdlSetloc:
 		g_curLBA = CdPosToInt((CdlLOC *)param);
 		return 1;
+	case CdlSeekL:
+		/*	fmv.cpp strKickCD: seek, then CdRead2 streams from here  */
+		if (param)
+		{
+			g_curLBA = CdPosToInt((CdlLOC *)param);
+			StrStream_Seek(g_curLBA);
+		}
+		return 1;
 	case CdlSetmode:
 		XaStream_SetMode(param ? param[0] : 0);
 		return 1;
 	case CdlPause:
-		XaStream_Pause();		/* only the XA stream has a motion to stop */
+		StrStream_Stop();		/* movie stream freezes... */
+		XaStream_Pause();		/* ...and the XA stream stops + ring flush */
 		return 1;
 	case CdlNop:
 	case CdlMute:
@@ -384,6 +398,29 @@ int Port_CdXaTrackInfo(FILE **fp, long *startLBA, long *sectors)
 	*startLBA = vf->startLBA;
 	*sectors  = vf->sizeBytes / vf->bytesPerSector;
 	return 1;
+}
+
+/*	str_stream.cpp binds movie files by position through this (M7).  */
+int Port_CdFileForLBA(long lba, FILE **fp, long *startLBA, long *sectors,
+					  int *bytesPerSector, const char **name)
+{
+	VirtFile *vf = fileForLBA(lba);
+	if (!vf || !vf->fp)
+		return 0;
+	*fp             = vf->fp;
+	*startLBA       = vf->startLBA;
+	*sectors        = vf->sizeBytes / vf->bytesPerSector;
+	*bytesPerSector = vf->bytesPerSector;
+	*name           = vf->name;
+	return 1;
+}
+
+/*	fmv.cpp strKickCD: `while(CdRead2(CdlModeStream|CdlModeSpeed|CdlModeRT)
+	== 0)` with no pump - must start streaming (str_stream.cpp) and report
+	nonzero immediately.  */
+extern "C" int CdRead2(long mode)
+{
+	return StrStream_Start(mode);
 }
 
 extern "C" CdlCB CdReadCallback(CdlCB func)
