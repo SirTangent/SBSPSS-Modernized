@@ -33,15 +33,6 @@ long DrawSync(long mode)
 	cleanly  */
 long StGetNext() { PSYQ_STUB_ONCE(); return 1; }
 
-/*	Real prototype (tools/vlc/include/VLC_BIT.H): the caller expects its
-	table filled through the pointer.  M7 must implement Build3 and vlc3
-	TOGETHER - a real DecDCTvlc3 over this no-op walks an unbuilt table.  */
-void DecDCTvlcBuild3(unsigned short *table)
-{
-	(void)table;
-	PSYQ_STUB_ONCE();
-}
-
 /*	CdRead2 must report "streaming started" (nonzero): fmv.cpp's strKickCD
 	spins `while(CdRead2(...)==0)` with no pump, so a 0 here hard-hangs the
 	THQ FMV scene right after the Nick logo.  With 1, StGetNext's bounded
@@ -49,9 +40,7 @@ void DecDCTvlcBuild3(unsigned short *table)
 	its whole decode loop - both FMV scenes skip cleanly to the main titles.
 	Real streaming lands in M7.  */
 long CdRead2() { PSYQ_STUB_ONCE(); return 1; }
-/*	DecDCTReset/in/out/outCallback are real (M7, psyq/mdec/mdec.cpp)  */
-long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
-long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
+/*	DecDCT* are real (M7): psyq/mdec/mdec.cpp and psyq/mdec/vlc3.cpp  */
 long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
 long StFreeRing() { PSYQ_STUB_ONCE(); return 0; }
 long StSetRing() { PSYQ_STUB_ONCE(); return 0; }
