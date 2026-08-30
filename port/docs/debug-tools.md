@@ -87,7 +87,8 @@ All optional, all read once at startup.
 | `SBSP_CD_PACE=0` | Disable the emulated 150 sectors/s double-speed CD pacing -> instant loads. Handy to reach a screen fast; note it also makes the loading icon never appear (the game skips it when zero vblanks elapse between `StartLoad` and `StopLoad`). **XA speech is unaffected**: it is real-time audio and stays clocked at 150 sectors/s of emulated time regardless. |
 | `SBSP_SAVE_DIR` | (M6) Where the memory card lives. Default `%APPDATA%\SBSPSS`; the card is a single standard 128KB image `card0.mcd` that DuckStation's memory-card editor opens natively (import/export real PS1 saves by dropping a file in either direction). Created formatted on first use. **The PC build fully loads this card at boot** (settings + game slots - conv_pc.md entry #21), so the slot-select screen shows saved games without a manual Options -> Load Game; the PlayStation build keeps the retail no-autoload behaviour. |
 | `SBSP_XA_LOG=1` | (M6) Trace XA speech streaming on stderr: stream start (sector + channel), terminator deliveries, pauses. Off by default - a clean run prints no `[xa]` lines. |
-| `SBSP_DUMP_AUDIO` | (M5) Write the SPU mixer output to this WAV path instead of opening a playback device: exactly `44100/hz` frames per emulated vblank, rendered after that vblank's `XM_Update`. Works headless and with no sound device. Two identical runs produce **bit-identical audio modulo a ±1-vblank start offset** (window bring-up races the wall-clock vblank counter) - compare runs aligned at the first non-zero sample, not by raw file hash. Never combine with real playback: each render advances the mixer, so two consumers would each get half the samples (which is why the device is disabled in dump mode). |
+| `SBSP_STR_LOG=1` | (M7) Trace movie streaming on stderr: stream start/stop (file + sector), each assembled frame, ring-full holds. Off by default - a clean run prints only the `end of stream` line per movie, and only when a movie runs to its last sector (the game's frame thresholds normally stop ~15 frames earlier). |
+| `SBSP_DUMP_AUDIO` | (M5) Write the SPU mixer output to this WAV path instead of opening a playback device: exactly `44100/hz` frames per emulated vblank, rendered after that vblank's `XM_Update`. Works headless and with no sound device. Two runs of the **same exe** produce bit-identical audio modulo a ±1-vblank start offset (window bring-up races the wall-clock vblank counter) - compare aligned at the first non-zero sample, not by raw file hash. **Two different builds are NOT comparable this way** (learned the hard way in M7): vblanks and CdRead deadlines are wall-clock paced, so a binary with a different execution speed tips load completions onto different vblanks, which shifts music-start/menu events relative to each other - the WAVs then diverge from the first such event even when the audio code is untouched. Cross-build refactor proof needs unit goldens (or a window with no loads in it), not this. Never combine with real playback: each render advances the mixer, so two consumers would each get half the samples (which is why the device is disabled in dump mode). |
 | `SBSP_NO_AUDIO=1` | Skip the audio device entirely (no dump either). The SPU/XM machinery still runs. |
 
 The frame dumps read emulated VRAM directly, so they work **even if Vulkan
@@ -161,6 +162,26 @@ $env:SBSP_PAD_SCRIPT = ($e -join ",")
 port\build\debug\sbsp.exe --exit-after 6600
 ```
 
+**M7: the movies really play now.**  A cold boot spends ~2,900 vblanks on
+THQ + Climax + Intro before the title appears, so pre-M7 route scripts that
+assumed instantly-skipped movies land mid-movie (where START/CROSS = skip).
+For scripted runs, prepend a skip trio and start the route at ~1500:
+
+```powershell
+$e = @("700:0800","712:0000","900:0800","912:0000","1100:0800","1112:0000")
+$t = 1500
+for ($n = 0; $n -lt 14; $n++) {
+  $m = if ($n % 2 -eq 0) { "0800" } else { "0040" }
+  $e += "${t}:$m"; $e += "$($t+12):0000"; $t += 220
+}
+$env:SBSP_PAD_SCRIPT = ($e -join ",")
+port\build\debug\sbsp.exe --exit-after 6200
+```
+
+(measured: skips land inside each movie, the title appears ~1300, and the
+route reaches `FrontEnd -> FMA -> Map -> Game` well before vblank 6200).
+To watch/dump the movies instead, script nothing before ~4000.
+
 **The M6 boot autoload shifts script timing.**  The card scan/load at boot
 consumes emulated vblanks before the title appears, which can push a
 fixed-vblank script off its alternation parity - a missed press costs one
@@ -204,6 +225,13 @@ Everything shim-side goes to **stderr** with a bracketed tag, so
 - `[xa]` (M6) - XA speech anomalies: TRACK1.IXA missing, an out-of-range
   `CdlReadS`, an unsupported coding byte, a short read.  With
   `SBSP_XA_LOG=1` it also traces stream start/pause/terminators.
+- `[str]` (M7) - movie-stream anomalies: a CdRead2 with no seek / into a
+  non-raw-XA file, an oversized or out-of-range frame chunk, a dropped
+  incomplete frame, a 5s frame drought (corrupt data -> movie skipped).
+  With `SBSP_STR_LOG=1` it also traces start/stop/frames/holds.
+- `[mdec]` / `[vlc3]` (M7) - decoder anomalies: an unimplemented DecDCTin
+  mode, truncated macroblocks, DecDCTout past the decoded frame, a bad BS
+  header/bitstream, an unsupported BS version.
 - `[mcrd]` (M6) - memory-card anomalies: an unwritable save location, a
   short/corrupt `card0.mcd` (recreated), plus one line when the image is
   first created.  A clean run prints **none** of `[spu]` `[xm]` `[xa]`
@@ -233,8 +261,8 @@ debugger.
 
 ## 7. Unit tests
 
-Ten self-contained exes per variant in `port\build\<variant>\`; each exits 0
-on pass and prints its own failures:
+Fourteen self-contained exes per variant in `port\build\<variant>\`; each
+exits 0 on pass and prints its own failures:
 
 | Exe | Covers |
 |---|---|
@@ -247,13 +275,18 @@ on pass and prints its own failures:
 | `xa_test.exe` | (M6) XA-ADPCM decoder: hand vectors, a cross-oracle against the SPU decoder on the same nibble stream, and real `Track1.Ixa` sectors bit-exact vs an ffmpeg golden (regenerate: `py port/tests/make_xa_fixture.py`); then the stream engine over a synthetic disc (cadence, filter routing, terminators, pause/resume, the FMV callback hold) and the mixer's CD slice (run from the repo root or the real-data layer skips) |
 | `mcrd_test.exe` | (M6) card-image FS (DuckStation-shaped image, chains, delete/reuse, capacity, format/unformat) + the libmcrd Sync-latch protocol; uses `SBSP_SAVE_DIR=./mcrd_test_tmp`, never a real card |
 | `pad_test.exe` | (M6, issue #21) SDL3 virtual gamepad: hotplug, the full button mapping, the >8192 trigger threshold, stick byte conversion, and rumble end to end (motor bytes -> the virtual device's rumble callback) |
+| `mdec_test.exe` | (M7) MDEC decoder core: run-level dequant rails/zigzag/qscale-0, IDCT flatness + golden vectors (`py port/tests/make_mdec_golden.py`), yuv byte order + macroblock golden, the DecDCTin/out pipeline incl. the callback trampoline |
+| `vlc3_test.exe` | (M7) VLC decoder: hand-assembled bitstreams for every AC class and both v3 DC tables; THQ frame 1 tolerance-compared vs an ffmpeg golden (`py port/tests/make_str_fixture.py`); then a sweep VLC-decoding **every frame of all four movies** off `data/CDData` (1800 blocks each, buffer-fit proof - skips if the data is absent) |
+| `str_test.exe` | (M7) STR streaming engine over a synthetic movie via the real CD dispatch: frame assembly/order/headers, the 9-chunk INTRO shape, ring backpressure hold + resume, the CdlModeSF audio gate both ways, stereo pair counts, EOF, CdlPause, StUnSetRing re-arm |
+| `fmv_pipeline_test.exe` | (M7) the whole movie pipeline headless (seek/CdRead2/St ring/vlc/mdec) - first 30 frames of each staged movie CRC32'd against `port/tests/fmv_crc_*.txt` (regenerate: `SBSP_WRITE_GOLDEN=1`; one-time ffmpeg tolerance report: dump with `SBSP_FMV_DUMP_RAW` and run `py port/tests/check_fmv_ffmpeg.py <dir>`) - skips if the movies are not staged |
 | `sbsp_headless.exe` | no window: dumps the 245-entry FAT, loads real lumps, CRCs them |
 
 Run all for both variants before any commit:
 
 ```powershell
 foreach ($v in 'debug','final') { foreach ($t in 'gte_trig_test','gte_test','gpu_test',
-    'adpcm_test','spu_test','xm_test','xa_test','mcrd_test','pad_test') {
+    'adpcm_test','spu_test','xm_test','xa_test','mcrd_test','pad_test',
+    'mdec_test','vlc3_test','str_test','fmv_pipeline_test') {
   & "port\build\$v\$t.exe"; "$v/$t -> $LASTEXITCODE" } }
 $env:SBSP_DATA_DIR = "out/USA/DEBUG/version/CD"
 port\build\final\sbsp_headless.exe
