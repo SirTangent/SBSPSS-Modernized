@@ -31,15 +31,22 @@ namespace
 
 std::mutex g_spuMutex;
 
-/*	CD-input ring (M6): 18.9kHz mono from the XA engine, ~1.7s of headroom
-	against 4032-sample sector lumps every ~213ms.  Free-running unsigned
-	head/tail; power-of-two mask.  All access under the mutex.  */
-const unsigned kCdRingSize = 32768;
-int16_t		g_cdRing[kCdRingSize];
-unsigned	g_cdHead, g_cdTail;
+/*	CD-input ring (M6, stereo since M7): interleaved L,R frames from the
+	XA/STR engines.  Speech pushes 18.9kHz mono (duplicated onto both
+	channels - arithmetic-identical to the old mono ring); FMV pushes
+	37.8kHz stereo pairs and sets the rate.  32768 frames = ~1.7s of
+	headroom for speech, ~0.87s for movies, against real-time sector
+	lumps.  Free-running unsigned head/tail counting FRAMES; power-of-two
+	mask.  All access under the mutex.  */
+const unsigned kCdRingSize = 32768;				/* frames (pairs) */
+int16_t		g_cdRing[kCdRingSize * 2];
+const unsigned kCdRingMask = kCdRingSize - 1;
+unsigned	g_cdHead, g_cdTail;					/* frame counters */
 uint8_t		g_cdAtv[4] = { 128, 0, 0, 128 };	/* identity: L->L, R->R */
+int			g_cdRate = 18900;					/* source frames per second */
 unsigned	g_cdPhase;							/* resampler, 0..44099 */
-int			g_cdPrev, g_cdCur;					/* interpolation taps */
+int			g_cdPrevL, g_cdCurL;				/* interpolation taps */
+int			g_cdPrevR, g_cdCurR;
 int			g_cdOverflowLogged;
 
 /*	psx-spx "Gauss Interpolation Table" - kept in its 16-per-row source
@@ -221,24 +228,49 @@ inline int clamp16(int s)
 void Spu_Lock(void)   { g_spuMutex.lock(); }
 void Spu_Unlock(void) { g_spuMutex.unlock(); }
 
+namespace
+{
+/*	Common push body; caller holds the mutex.  */
+inline int cdPushFrame(int16_t l, int16_t r)
+{
+	if (g_cdHead - g_cdTail >= kCdRingMask + 1)
+	{
+		/*	cannot happen under normal pacing (the producer is real-time);
+			a diagnosis line beats silently eating the overrun  */
+		if (!g_cdOverflowLogged)
+		{
+			fprintf(stderr, "[spu] CD-input ring overflow - dropping\n");
+			g_cdOverflowLogged = 1;
+		}
+		return 0;
+	}
+	unsigned at = (g_cdHead++ & (kCdRingMask)) * 2;
+	g_cdRing[at] = l;
+	g_cdRing[at + 1] = r;
+	return 1;
+}
+}	/* namespace */
+
 void Spu_CdInPush(const int16_t *mono, int n)
 {
 	std::lock_guard<std::mutex> lock(g_spuMutex);
 	for (int i = 0; i < n; i++)
-	{
-		if (g_cdHead - g_cdTail >= kCdRingSize)
-		{
-			/*	cannot happen under normal pacing (the producer is real-time);
-				a diagnosis line beats silently eating the overrun  */
-			if (!g_cdOverflowLogged)
-			{
-				fprintf(stderr, "[spu] CD-input ring overflow - dropping\n");
-				g_cdOverflowLogged = 1;
-			}
+		if (!cdPushFrame(mono[i], mono[i]))
 			return;
-		}
-		g_cdRing[g_cdHead++ & (kCdRingSize - 1)] = mono[i];
-	}
+}
+
+void Spu_CdInPushStereo(const int16_t *pairs, int nPairs)
+{
+	std::lock_guard<std::mutex> lock(g_spuMutex);
+	for (int i = 0; i < nPairs; i++)
+		if (!cdPushFrame(pairs[i * 2], pairs[i * 2 + 1]))
+			return;
+}
+
+void Spu_CdInSetRate(int hz)
+{
+	std::lock_guard<std::mutex> lock(g_spuMutex);
+	g_cdRate = hz;
 }
 
 void Spu_CdInClear(void)
@@ -246,7 +278,9 @@ void Spu_CdInClear(void)
 	std::lock_guard<std::mutex> lock(g_spuMutex);
 	g_cdHead = g_cdTail = 0;
 	g_cdPhase = 0;
-	g_cdPrev = g_cdCur = 0;
+	g_cdPrevL = g_cdCurL = 0;
+	g_cdPrevR = g_cdCurR = 0;
+	g_cdRate = 18900;
 }
 
 unsigned Spu_CdInCountForTest(void)
@@ -327,26 +361,37 @@ void Spu_RenderFrames(int16_t *stereoOut, int nFrames)
 			sumR += (s * v.volR) >> 14;
 		}
 
-		/*	CD input: consume at 18.9kHz regardless of the mix gate (the CD
-			keeps playing whether or not the SPU mixes it, and a muted
-			stream must not back up the ring), linear-interpolated 3:7 up to
-			44.1kHz.  Mono duplicates onto both CD channels, then the CdMix
-			ATV matrix (128 = unity per side - the game's all-127 sums to
-			~2x, as on hardware) and the common CD volume (0x7FFF ~ unity),
-			summed BEFORE the master multiply like the real SPU.  */
-		g_cdPhase += 18900;
+		/*	CD input: consume at the source rate (18.9kHz speech, 37.8kHz
+			STR) regardless of the mix gate (the CD keeps playing whether
+			or not the SPU mixes it, and a muted stream must not back up
+			the ring), linear-interpolated per channel up to 44.1kHz.  Mono
+			pushes duplicate onto both channels, keeping this arithmetic-
+			identical to the M6 mono ring; then the CdMix ATV matrix (128 =
+			unity per side - the game's all-127 sums L+R onto both outputs,
+			~2x for duplicated mono, as on hardware) and the common CD
+			volume (0x7FFF ~ unity), summed BEFORE the master multiply like
+			the real SPU.  */
+		g_cdPhase += (unsigned)g_cdRate;
 		while (g_cdPhase >= 44100)
 		{
 			g_cdPhase -= 44100;
-			g_cdPrev = g_cdCur;
-			g_cdCur = (g_cdTail != g_cdHead)
-					  ? g_cdRing[g_cdTail++ & (kCdRingSize - 1)] : 0;
+			g_cdPrevL = g_cdCurL;
+			g_cdPrevR = g_cdCurR;
+			if (g_cdTail != g_cdHead)
+			{
+				unsigned at = (g_cdTail++ & (kCdRingMask)) * 2;
+				g_cdCurL = g_cdRing[at];
+				g_cdCurR = g_cdRing[at + 1];
+			}
+			else
+				g_cdCurL = g_cdCurR = 0;
 		}
 		if (g_spuCdMixOn)
 		{
-			int s = g_cdPrev + (int)((g_cdCur - g_cdPrev) * (long)g_cdPhase / 44100);
-			int cdL = (s * g_cdAtv[0] + s * g_cdAtv[2]) >> 7;
-			int cdR = (s * g_cdAtv[1] + s * g_cdAtv[3]) >> 7;
+			int sL = g_cdPrevL + (int)((g_cdCurL - g_cdPrevL) * (long)g_cdPhase / 44100);
+			int sR = g_cdPrevR + (int)((g_cdCurR - g_cdPrevR) * (long)g_cdPhase / 44100);
+			int cdL = (sL * g_cdAtv[0] + sR * g_cdAtv[2]) >> 7;
+			int cdR = (sL * g_cdAtv[1] + sR * g_cdAtv[3]) >> 7;
 			/*	64-bit for the volume step: cdL/cdR reach +-130,555 with the
 				ATV matrix at full scale, which times a 0x7FFF CD volume
 				overflows a 32-bit int.  The game's own 127/32000 programming

@@ -302,6 +302,57 @@ static void mixSliceTest(void)
 	Spu_CdInClear();
 }
 
+/*****************************************************************************/
+/*	Stereo CD slice (M7): distinct L/R constants at 37.8kHz through a CROSS
+	ATV matrix must come out swapped, with the same vol arithmetic.  */
+static void stereoMixSliceTest(void)
+{
+	Spu_Lock();
+	memset(g_spuVoice, 0, sizeof(SpuVoiceState) * SPU_NVOICES);
+	g_spuMasterVolL = g_spuMasterVolR = 0x3FFF;
+	g_spuCdVolL = g_spuCdVolR = 0x7FFF;
+	g_spuCdMixOn = 1;
+	Spu_Unlock();
+	Spu_SetCdAtv(0, 128, 128, 0);		/* cross: L->R, R->L */
+	Spu_CdInClear();
+	Spu_CdInSetRate(37800);
+
+	const int16_t kL = 1000, kR = -3000;
+	static int16_t pairs[4096 * 2];
+	for (int i = 0; i < 4096; i++)
+	{
+		pairs[i * 2] = kL;
+		pairs[i * 2 + 1] = kR;
+	}
+	Spu_CdInPushStereo(pairs, 4096);
+
+	int cdL      = (kL * 0 + kR * 128) >> 7;			/* = kR */
+	int cdR      = (kL * 128 + kR * 0) >> 7;			/* = kL */
+	int expectL  = (((cdL * 0x7FFF) >> 15) * 0x3FFF) >> 14;
+	int expectR  = (((cdR * 0x7FFF) >> 15) * 0x3FFF) >> 14;
+
+	static int16_t outBuf[512 * 2];
+	Spu_RenderFrames(outBuf, 8);		/* warm the taps */
+	Spu_RenderFrames(outBuf, 512);
+	bool flat = true;
+	for (int i = 0; i < 512 && flat; i++)
+		flat = outBuf[i * 2 + 0] == expectL && outBuf[i * 2 + 1] == expectR;
+	check(flat, "stereo CD slice: 37.8kHz pairs through a cross ATV matrix");
+
+	/*	rate accounting: 512 output frames at 37800/44100 consume ~439
+		ring frames (+-1 for phase).  */
+	unsigned used = 4096 - Spu_CdInCountForTest();
+	unsigned expectUsed = (unsigned)(((int64_t)(8 + 512) * 37800) / 44100);
+	check(used >= expectUsed && used <= expectUsed + 1,
+		  "stereo CD slice: ring drains at the source rate");
+
+	Spu_Lock();
+	g_spuCdMixOn = 0;
+	g_spuCdVolL = g_spuCdVolR = 0;
+	Spu_Unlock();
+	Spu_CdInClear();
+}
+
 int main(void)
 {
 	static uint8_t	user[XA_SECTOR_USER_BYTES];
@@ -446,8 +497,106 @@ int main(void)
 		check(mismatches == 0, "real Track1.Ixa sectors decode bit-identical to ffmpeg");
 	}
 
+	/*	-------- 3b: stereo decode (M7 STR audio)  */
+	{
+		static uint8_t	suser[XA_SECTOR_USER_BYTES];
+		static int16_t	pairs[2 * XA_SECTOR_PAIRS];
+		uint8_t params[8];
+		uint8_t nib[8][28];
+
+		/*	filter 0, varied shifts, distinct nibbles per unit: assert the
+			L/R interleave places even units at [2i], odd at [2i+1], in
+			unit-pair time order.  */
+		for (int b = 0; b < 8; b++)
+		{
+			params[b] = (uint8_t)(b % 5);		/* filter 0, shift 0..4 */
+			for (int i = 0; i < 28; i++)
+				nib[b][i] = (uint8_t)((b * 3 + i) & 0x0F);
+		}
+		memset(suser, 0, sizeof(suser));
+		buildGroup(suser, params, nib);
+		int32_t l1 = 0, l2 = 0, r1 = 0, r2 = 0;
+		XaAdpcm_DecodeSector4bitStereo(suser, pairs, &l1, &l2, &r1, &r2);
+		bool ok = true;
+		for (int u = 0; u < 8 && ok; u++)
+			for (int i = 0; i < 28; i++)
+			{
+				int expect = (int16_t)(nib[u][i] << 12) >> params[u];
+				int at = ((u / 2) * 28 + i) * 2 + (u & 1);
+				if (pairs[at] != expect)
+				{
+					std::printf("  stereo unit %d sample %d: got %d expect %d\n",
+								u, i, pairs[at], expect);
+					ok = false;
+					break;
+				}
+			}
+		check(ok, "stereo: filter-0 units land interleaved L/R in pair order");
+
+		/*	channel independence: identical nibbles+params on L and R with a
+			history-using filter must produce identical channels.  */
+		for (int b = 0; b < 8; b++)
+		{
+			params[b] = (uint8_t)((2 << 4) | 3);	/* filter 2, shift 3 */
+			for (int i = 0; i < 28; i++)
+				nib[b][i] = (uint8_t)((7 * (b / 2) + i * 5) & 0x0F);
+		}
+		for (int b = 0; b < 8; b += 2)
+			memcpy(nib[b + 1], nib[b], 28);		/* R mirrors L */
+		for (int grp = 0; grp < 18; grp++)
+			buildGroup(suser + grp * 128, params, nib);
+		l1 = l2 = r1 = r2 = 0;
+		XaAdpcm_DecodeSector4bitStereo(suser, pairs, &l1, &l2, &r1, &r2);
+		ok = true;
+		for (int i = 0; i < XA_SECTOR_PAIRS && ok; i++)
+			ok = pairs[i * 2] == pairs[i * 2 + 1];
+		check(ok && l1 == r1 && l2 == r2,
+			  "stereo: mirrored input decodes to identical channels");
+	}
+
+	/*	-------- 3c: real thq.str stereo sectors vs the ffmpeg golden  */
+	{
+		FILE *ss = fopen("port/tests/xa_stereo_sectors.bin", "rb");
+		FILE *sg = fopen("port/tests/xa_stereo_golden.pcm", "rb");
+		if (!ss || !sg)
+		{
+			std::printf("xa_test: stereo fixtures not found (run from the repo "
+						"root) - stereo golden SKIPPED\n");
+			if (ss) fclose(ss);
+			if (sg) fclose(sg);
+		}
+		else
+		{
+			static uint8_t	sector[2336];
+			static int16_t	pairs[XA_SECTOR_PAIRS * 2];
+			static int16_t	golden[2 * XA_SECTOR_PAIRS * 2];
+			size_t gn = fread(golden, 2, 2 * XA_SECTOR_PAIRS * 2, sg);
+			fclose(sg);
+			check(gn == 2 * XA_SECTOR_PAIRS * 2, "stereo golden is 2 sectors");
+
+			int32_t l1 = 0, l2 = 0, r1 = 0, r2 = 0;
+			int mismatches = 0;
+			for (int s = 0; s < 2; s++)
+			{
+				check(fread(sector, 1, 2336, ss) == 2336, "stereo sector read");
+				check(sector[3] == 0x01, "fixture coding is stereo 37.8kHz 4-bit");
+				XaAdpcm_DecodeSector4bitStereo(sector + 8, pairs,
+											   &l1, &l2, &r1, &r2);
+				for (int i = 0; i < XA_SECTOR_PAIRS * 2; i++)
+					if (pairs[i] != golden[s * XA_SECTOR_PAIRS * 2 + i])
+						mismatches++;
+			}
+			fclose(ss);
+			if (mismatches)
+				std::printf("  stereo real-data: %d samples differ\n", mismatches);
+			check(mismatches == 0,
+				  "real thq.str stereo sectors decode bit-identical to ffmpeg");
+		}
+	}
+
 	streamEngineTests();
 	mixSliceTest();
+	stereoMixSliceTest();
 
 	if (g_failures)
 	{
