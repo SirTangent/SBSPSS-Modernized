@@ -49,10 +49,7 @@ void DecDCTvlcBuild3(unsigned short *table)
 	its whole decode loop - both FMV scenes skip cleanly to the main titles.
 	Real streaming lands in M7.  */
 long CdRead2() { PSYQ_STUB_ONCE(); return 1; }
-long DecDCTReset() { PSYQ_STUB_ONCE(); return 0; }
-long DecDCTin() { PSYQ_STUB_ONCE(); return 0; }
-long DecDCTout() { PSYQ_STUB_ONCE(); return 0; }
-long DecDCToutCallback() { PSYQ_STUB_ONCE(); return 0; }
+/*	DecDCTReset/in/out/outCallback are real (M7, psyq/mdec/mdec.cpp)  */
 long DecDCTvlc3() { PSYQ_STUB_ONCE(); return 0; }
 long DecDCTvlcSize3() { PSYQ_STUB_ONCE(); return 0; }
 long StCdInterrupt() { PSYQ_STUB_ONCE(); return 0; }
