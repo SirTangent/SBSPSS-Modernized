@@ -85,30 +85,45 @@ const uint16_t AC_LZ11_X4[16] =
 	0x3402, 0x3002, 0x2C02, 0x7C01, 0x7801, 0x7401, 0x7001, 0x6C01,
 };
 
-/*	MSB-first bit reader over little-endian halfwords.  */
+/*	A frame's compressed data cannot exceed the whole StSetRing buffer
+	(fmv.cpp: 32 sectors = 64KB), so that is the hard read bound.  */
+const unsigned kMaxBitstreamHalfwords = 32768;
+
+/*	MSB-first bit reader over little-endian halfwords.  Reads past `end`
+	yield zero bits and raise `overrun` rather than walking memory: the
+	bitstream length is not passed in, and a truncated frame must end the
+	decode instead of running off the ring.  Zeros also terminate every
+	code path on their own (an all-zero prefix is the unused/invalid code
+	in both the AC and DC tables).  */
 struct Bits
 {
 	const uint16_t	*p;
+	const uint16_t	*end;
 	uint32_t		acc;
 	int				n;
-	long			pulled;				/* halfwords consumed (sanity cap) */
+	int				overrun;
 };
 
-void bitsInit(Bits *b, const uint16_t *p)
+void bitsInit(Bits *b, const uint16_t *p, const uint16_t *end)
 {
 	b->p = p;
+	b->end = end;
 	b->acc = 0;
 	b->n = 0;
-	b->pulled = 0;
+	b->overrun = 0;
 }
 
 inline unsigned bitsPeek(Bits *b, int k)
 {
 	while (b->n < k)
 	{
-		b->acc = (b->acc << 16) | *b->p++;
+		uint16_t hw = 0;
+		if (b->p < b->end)
+			hw = *b->p++;
+		else
+			b->overrun = 1;
+		b->acc = (b->acc << 16) | hw;
 		b->n += 16;
-		b->pulled++;
 	}
 	return (b->acc >> (b->n - k)) & ((1u << k) - 1u);
 }
@@ -264,19 +279,29 @@ extern "C" int DecDCTvlc3(unsigned long *bs, unsigned long *buf)
 		return 0;
 	}
 
+	if (declWords > MDEC_MAX_STREAM_WORDS)
+	{
+		/*	The size is disc data; the output buffer is the game's prim
+			pool.  Clamp before it is used as a write bound OR handed on
+			in buf[0] (mdec.cpp derives its read limit from it).  */
+		PSYQ_LOG_ONCE_KEYED(1, "[vlc3] BS declares %u words (max %u) - "
+							"clamped\n", declWords, MDEC_MAX_STREAM_WORDS);
+		declWords = MDEC_MAX_STREAM_WORDS;
+	}
+
 	uint16_t *out = (uint16_t *)(buf + 1);
 	unsigned outMax = declWords * 2;	/* halfwords, the hardware buffer */
 	unsigned n = 0;
 
 	Bits b;
-	bitsInit(&b, hdr + 4);
+	bitsInit(&b, hdr + 4, hdr + 4 + kMaxBitstreamHalfwords);
 	int predCr = 0, predCb = 0, predY = 0;
 	int blockIdx = 0;					/* 0=Cr 1=Cb 2..5=Y1..Y4 */
 	int bad = 0;
 
 	for (;;)
 	{
-		if (b.pulled > 0x20000)			/* 256KB of bits: corrupt stream */
+		if (b.overrun)					/* ran off the end: corrupt stream */
 		{
 			bad = 1;
 			break;

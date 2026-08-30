@@ -262,8 +262,16 @@ extern "C" void DecDCTin(u_long *buf, int mode)
 	if ((w0 >> 16) != MDEC_MAGIC)
 		PSYQ_LOG_ONCE_KEYED(0, "[mdec] DecDCTin header %08lX lacks 3800 "
 							"magic - decoding anyway\n", (unsigned long)w0);
+	uint32_t words = w0 & 0xFFFF;
+	if (words > MDEC_MAX_STREAM_WORDS)
+	{
+		PSYQ_LOG_ONCE_KEYED(4, "[mdec] stream declares %lu words (max %d) - "
+							"clamped\n", (unsigned long)words,
+							MDEC_MAX_STREAM_WORDS);
+		words = MDEC_MAX_STREAM_WORDS;
+	}
 	const uint16_t *src = (const uint16_t *)(buf + 1);
-	const uint16_t *end = src + (w0 & 0xFFFF) * 2;
+	const uint16_t *end = src + words * 2;
 
 	int16_t blk[6][64];
 	for (;;)

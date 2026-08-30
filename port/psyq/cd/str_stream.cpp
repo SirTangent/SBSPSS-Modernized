@@ -62,6 +62,7 @@ struct FrameSlot
 {
 	unsigned	offset;					/* byte offset in the game's ring */
 	unsigned	bytes;					/* nSectors * 2016 */
+	uint32_t	seen;					/* bit per received chunk index */
 	unsigned	chunksGot;
 	int			ready;
 	int			handedOut;
@@ -88,7 +89,6 @@ long		g_fileStartLBA, g_fileSectors;
 const char	*g_fileName;
 long		g_curSector;
 long		g_acc;						/* fractional sector clock */
-int			g_rateSet;
 int32_t		g_hL1, g_hL2, g_hR1, g_hR2;	/* ADPCM history (stereo/mono) */
 
 int			g_trace = -1;				/* SBSP_STR_LOG */
@@ -152,7 +152,6 @@ void resetStream(void)
 	g_fp = NULL;
 	g_curSector = 0;
 	g_acc = 0;
-	g_rateSet = 0;
 	g_hL1 = g_hL2 = g_hR1 = g_hR2 = 0;
 }
 
@@ -210,22 +209,17 @@ int deliverNext(void)
 		}
 		if (coding == 0x01)
 		{
-			if (!g_rateSet)
-			{
-				Spu_CdInSetRate(37800);
-				g_rateSet = 1;
-			}
+			/*	per sector, not latched: Spu_CdInClear() resets the rate to
+				18900 and is called from outside this engine (CdlPause, and
+				every vblank with no audio consumer)  */
+			Spu_CdInSetRate(37800);
 			XaAdpcm_DecodeSector4bitStereo(sec + 8, pcm,
 										   &g_hL1, &g_hL2, &g_hR1, &g_hR2);
 			Spu_CdInPushStereo(pcm, XA_SECTOR_PAIRS);
 		}
 		else if (coding == 0x04)
 		{
-			if (!g_rateSet)
-			{
-				Spu_CdInSetRate(18900);
-				g_rateSet = 1;
-			}
+			Spu_CdInSetRate(18900);
 			XaAdpcm_DecodeSector4bitMono(sec + 8, pcm, &g_hL1, &g_hL2);
 			Spu_CdInPush(pcm, XA_SECTOR_SAMPLES);
 		}
@@ -296,16 +290,27 @@ int deliverNext(void)
 		memcpy(&s->hdr, d, sizeof(StHEADER) < 32u ? sizeof(StHEADER) : 32u);
 	}
 
-	if (secOff < nSectors)
+	/*	The SLOT's geometry is the authority, never this sector's header: a
+		later chunk claiming a bigger nSectors (corrupt STR, bit flip) must
+		not write outside the region allocated from the first chunk, and a
+		duplicate must not "complete" a frame that still has a hole.  */
+	unsigned slotSectors = s->hdr.nSectors;
+	unsigned at = (unsigned)secOff * 2016u;
+	if (secOff < slotSectors && at + 2016u <= s->bytes)
 	{
-		memcpy(g_ring + s->offset + (unsigned)secOff * 2016u, d + 0x20, 2016);
-		s->chunksGot++;
+		memcpy(g_ring + s->offset + at, d + 0x20, 2016);
+		if (!(s->seen & (1u << secOff)))
+		{
+			s->seen |= 1u << secOff;
+			s->chunksGot++;
+		}
 	}
 	else
-		PSYQ_LOG_ONCE_KEYED(2, "[str] chunk %u of %u out of range\n",
-							secOff, nSectors);
+		PSYQ_LOG_ONCE_KEYED(2, "[str] chunk %u (of %u) outside frame %lu's "
+							"%u-sector region - dropped\n", secOff, nSectors,
+							(unsigned long)s->hdr.frameCount, slotSectors);
 
-	if (s->chunksGot == nSectors)
+	if (s->chunksGot == slotSectors)
 	{
 		s->ready = 1;
 		if (trace())
@@ -446,6 +451,8 @@ extern "C" u_long StGetNext(u_long **addr, u_long **header)
 		return 1;
 
 	unsigned long waitStart = 0;
+	int waiting = 0;					/* vblank 0 is a legal start time,
+										   so a 0 sentinel would never arm */
 	for (;;)
 	{
 		/*	oldest not-yet-handed-out ready frame, in FIFO order  */
@@ -467,8 +474,11 @@ extern "C" u_long StGetNext(u_long **addr, u_long **header)
 		/*	Block for the next frame: the pump advances the sector clock.
 			A bounded wait (5s of emulated time) turns corrupt data into a
 			skipped movie instead of a wedged boot.  */
-		if (!waitStart)
+		if (!waiting)
+		{
+			waiting = 1;
 			waitStart = Port_VBlankCount();
+		}
 		else if (Port_VBlankCount() - waitStart > 300)
 		{
 			fprintf(stderr, "[str] no frame within 5s - giving up\n");

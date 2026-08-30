@@ -20,6 +20,13 @@
 #define MDEC_MAGIC			0x3800u
 #define MDEC_MB_BYTES_24BPP	768			/* 16x16 px, 3 bytes each */
 #define MDEC_MAX_MB			512			/* frame cap (320x240 needs 300) */
+/*	Cap on one run-level stream, in 32-bit words.  fmv.cpp hands
+	DecDCTvlc3 a 320x241 prim-pool buffer (strSetDefDecEnv), so 77,120
+	bytes minus the leading control word is all a frame may ever occupy.
+	The declared size comes straight off the disc, so BOTH the producer
+	(vlc3) and the consumer (mdec) clamp against this - a corrupt header
+	would otherwise walk the prim pool.  */
+#define MDEC_MAX_STREAM_WORDS	19279
 
 #ifdef __cplusplus
 extern "C" {
