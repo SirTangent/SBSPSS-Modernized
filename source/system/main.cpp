@@ -156,8 +156,15 @@ static void DoAutoLoadPC()
 	   MemCard::GetFileCountOnCard(0)&&
 	   autoloadDb.startLoad(0))
 	{
-		while(autoloadDb.getLoadStatus()==CSaveLoadDatabase::IN_PROGRESS)
+		/*	Bounded like the poll above: getLoadStatus only leaves
+			IN_PROGRESS when a completion callback fires (or the card
+			reports removal), and memcard.cpp has paths that drop back to
+			CmdNone without calling it.  Boot must not hang on a black
+			screen if one is ever reached - give up and start unloaded.  */
+		for(frames=0;frames<120;frames++)
 		{
+			if(autoloadDb.getLoadStatus()!=CSaveLoadDatabase::IN_PROGRESS)
+				break;
 			autoloadDb.think();
 			VSync(0);
 		}

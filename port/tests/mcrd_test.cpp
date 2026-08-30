@@ -218,8 +218,81 @@ int main(void)
 	MemCardGetDirentry(0, (char *)"*", dir, &files, 0, 15);
 	check(files == 0, "format wiped the files");
 
+	/*	-------- hostile card images.
+
+		Card_Open accepts any 128KB file and importing real PS1 saves is a
+		documented use, so a dir frame can carry any 16-bit "next block"
+		link.  Unvalidated, that indexed the 128KB image with up to
+		65535 * 8192 - a wild read on load and a wild WRITE on save/delete -
+		and a self-referencing chain never terminated.  Both must now be
+		refused rather than followed.  (A crash here fails the test by
+		taking the process out, which is the point.)  */
+	{
+		uint8_t *img = Card_ImageForTest();
+		check(MemCardCreateFile(0, (char *)FNAME, 1) == McErrNone,
+			  "hostile: file created");
+
+		int first = 0;
+		for (int b = 1; b <= 15; b++)
+			if (img[b * CARD_FRAME_SIZE] == 0x51)
+				first = b;
+		check(first != 0, "hostile: found the first link");
+
+		/*	a whole card's worth of destination, so the hostile reads below
+			have somewhere legal to land while the chain is walked  */
+		static unsigned char wide[16 * 8192];
+
+		/*	link far outside the image  */
+		uint8_t *d = img + first * CARD_FRAME_SIZE;
+		d[8] = 0xF0; d[9] = 0xFF;			/* next = 0xFFF0, not 0xFFFF */
+		check(MemCardReadFile(0, (char *)FNAME, (unsigned long *)wide, 0, sizeof(wide)) == 1,
+			  "hostile: out-of-range link read registers");
+		check(syncResult(McFuncReadFile, "hostile read") != McErrNone,
+			  "out-of-range block link is refused, not followed");
+
+		/*	self-referencing chain: the block links to itself, so the walk
+			only ends because of the hop cap  */
+		d[8] = (uint8_t)(first - 1); d[9] = 0;
+		check(MemCardReadFile(0, (char *)FNAME, (unsigned long *)wide, 0, sizeof(wide)) == 1,
+			  "hostile: cyclic link read registers");
+		check(syncResult(McFuncReadFile, "cyclic read") != McErrNone,
+			  "cyclic block chain terminates instead of spinning");
+		check(MemCardDeleteFile(0, (char *)FNAME) == McErrNone,
+			  "cyclic chain deletes without running off the image");
+	}
+
+	/*	-------- a file that is not a 128KB card image must NOT be
+		reformatted out from under the user (a .vmp, a padded dump, or a
+		file another process is still writing).  */
 	remove("mcrd_test_tmp\\card0.mcd");
 	_rmdir("mcrd_test_tmp");
+	_mkdir("mcrd_test_tmp2");
+	{
+		FILE *odd = fopen("mcrd_test_tmp2\\card0.mcd", "wb");
+		check(odd != NULL, "odd-sized card written");
+		if (odd)
+		{
+			static unsigned char junk[1024];
+			memset(junk, 0xAB, sizeof(junk));
+			fwrite(junk, 1, sizeof(junk), odd);
+			fclose(odd);
+		}
+		_putenv("SBSP_SAVE_DIR=mcrd_test_tmp2");
+		Card_ResetForTest();
+		check(Card_Open() == CARD_IO_ERROR, "odd-sized card file is refused");
+
+		odd = fopen("mcrd_test_tmp2\\card0.mcd", "rb");
+		long size = 0;
+		if (odd)
+		{
+			fseek(odd, 0, SEEK_END);
+			size = ftell(odd);
+			fclose(odd);
+		}
+		check(size == 1024, "the refused file was left untouched");
+		remove("mcrd_test_tmp2\\card0.mcd");
+		_rmdir("mcrd_test_tmp2");
+	}
 
 	if (g_failures)
 	{

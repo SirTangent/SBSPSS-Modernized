@@ -33,9 +33,11 @@ extern unsigned char *Port_PadMotor[2];		/* pads_shim.cpp - PadSetAct buffer */
 static SDL_Gamepad	*g_gamepad;
 
 /*	Rumble (M6): last values armed on the device, so a steady game state
-	does not spam the driver every vblank.  */
+	does not spam the driver every vblank, plus the small motor's smoothed
+	level (see rumbleFrame).  */
 static Uint16			g_rumbleLow, g_rumbleHigh;
 static unsigned long	g_rumbleArmVblank;
+static int				g_smallLevel;
 
 /*	button masks in the (Button1<<8)|Button2 word (active-high here;
 	inverted at packet-build time)  */
@@ -128,6 +130,7 @@ extern "C" void Port_InputHandleEvent(const void *evv)
 			fprintf(stderr, "[input] gamepad connected: %s\n",
 					SDL_GetGamepadName(g_gamepad));
 		g_rumbleLow = g_rumbleHigh = 0;		/* fresh device: re-arm from scratch */
+		g_smallLevel = 0;
 	}
 	else if (ev->type == SDL_EVENT_GAMEPAD_REMOVED && g_gamepad &&
 			 ev->gdevice.which == SDL_GetGamepadID(g_gamepad))
@@ -135,6 +138,7 @@ extern "C" void Port_InputHandleEvent(const void *evv)
 		SDL_CloseGamepad(g_gamepad);
 		g_gamepad = NULL;
 		g_rumbleLow = g_rumbleHigh = 0;
+		g_smallLevel = 0;
 		fprintf(stderr, "[input] gamepad disconnected\n");
 	}
 }
@@ -209,37 +213,66 @@ static unsigned char stickByte(SDL_Gamepad *p, SDL_GamepadAxis axis)
 /*****************************************************************************/
 /*	Rumble (M6): forward the actuator bytes the game writes into the
 	PadSetAct buffer (pads.cpp ReadController) to the SDL gamepad.
-	Layout per PadAlign {0,1,...}: byte 0 = small motor on/off (the game
-	derives it as intensity&1, and clamps intensity to 254, so it is almost
-	always 0), byte 1 = big motor 0-255.  The big motor maps to SDL's
-	low-frequency (heavy) rumble, the small one to high-frequency.
+	Layout per PadAlign {0,1,...}: byte 0 = small motor on/off, byte 1 =
+	big motor 0-255.  The big motor maps to SDL's low-frequency (heavy)
+	rumble, the small one to high-frequency.
+
+	The small motor needs smoothing.  The game derives it as
+	(intensity & 1) from the SAME summed envelope that drives the big motor
+	(pads.cpp:271, and vibe.cpp:130 clamps only the top end), so the bit is
+	effectively a coin flip that changes almost every frame throughout any
+	vibration.  Driving SDL's high-frequency motor straight off it would
+	slam between silence and full scale at ~30Hz - which no physical small
+	motor can follow, and which would defeat the re-arm limiter below by
+	making the value "change" on nearly every vblank.  A first-order decay
+	toward the bit approximates the motor inertia that does the averaging on
+	real hardware, and a deadband keeps the residual wobble (and the big
+	motor's own per-frame envelope steps) from re-arming constantly.
 
 	SDL_RumbleGamepad is armed with a 100ms window and re-armed every 3
 	vblanks while nonzero (50-60ms, comfortably inside the window), or
-	immediately on a value change - never every vblank, which would spam the
-	USB stack.  A transition to zero sends one explicit stop so rumble ends
-	when the game says so, not when the window runs out.  */
+	immediately on a meaningful change.  A transition to zero sends one
+	explicit stop so rumble ends when the game says so, not when the window
+	runs out.  */
 static void rumbleFrame(unsigned long vblank)
 {
+	/*	The decay rate and the deadband are a pair: a bit alternating every
+		frame settles into a steady oscillation of about +-1000 around the
+		half-scale mean, which has to stay INSIDE the deadband or the
+		re-arm limiter is defeated exactly as it was before the smoothing. */
+	static const int kDeadband = 0x1000;		/* ~6% of full scale */
+
 	if (!g_gamepad)
 		return;
 
 	const unsigned char *m = Port_PadMotor[0];
-	Uint16 low  = 0;
-	Uint16 high = 0;
+	Uint16 low = 0;
+	int    bit = 0;
 	if (m)
 	{
-		low  = (Uint16)((m[1] << 8) | m[1]);	/* 0..255 -> 0..0xFFFF */
-		high = (m[0] & 1) ? 0xFFFF : 0;
+		low = (Uint16)((m[1] << 8) | m[1]);		/* 0..255 -> 0..0xFFFF */
+		bit = m[0] & 1;
 	}
 
-	bool changed = (low != g_rumbleLow) || (high != g_rumbleHigh);
-	bool rearm   = (low | high) && (vblank - g_rumbleArmVblank >= 3);
+	if (!low && !bit)
+		g_smallLevel = 0;						/* game says stop: no tail */
+	else
+		g_smallLevel += ((bit ? 0xFFFF : 0) - g_smallLevel) >> 4;
+	Uint16 high = (Uint16)(g_smallLevel < 0 ? 0 : g_smallLevel);
+
+	bool zero     = !low && !high;
+	bool wasZero  = !g_rumbleLow && !g_rumbleHigh;
+	int  dLow     = (int)low  - (int)g_rumbleLow;
+	int  dHigh    = (int)high - (int)g_rumbleHigh;
+	bool changed  = (zero != wasZero) ||
+					(dLow  > kDeadband || dLow  < -kDeadband) ||
+					(dHigh > kDeadband || dHigh < -kDeadband);
+	bool rearm    = !zero && (vblank - g_rumbleArmVblank >= 3);
 	if (!changed && !rearm)
 		return;
 
 	/*	stop = duration 0 with zero magnitudes; active = 100ms window  */
-	SDL_RumbleGamepad(g_gamepad, low, high, (low | high) ? 100 : 0);
+	SDL_RumbleGamepad(g_gamepad, low, high, zero ? 0 : 100);
 	g_rumbleLow       = low;
 	g_rumbleHigh      = high;
 	g_rumbleArmVblank = vblank;

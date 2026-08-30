@@ -242,10 +242,12 @@ extern "C" void Port_CdVblank(int vblankHz)
 		return;					/* callback cleared (FMV): hold in place */
 
 	g_acc += 150;
-	while (g_acc >= vblankHz && g_playing)
+	while (g_acc >= vblankHz && g_playing && g_cdReadyCallback)
 	{
 		g_acc -= vblankHz;
-		deliverNext();			/* may clear g_playing via the callback's
-								   own CdlPause - hence the re-check */
+		deliverNext();			/* may clear g_playing via the callback's own
+								   CdlPause, or (FMV) drop the registration -
+								   both re-checked before the next delivery of
+								   this 2-3 sector burst */
 	}
 }

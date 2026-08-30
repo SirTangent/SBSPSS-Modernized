@@ -19,6 +19,11 @@
 	The whole image lives in memory; every mutation rewrites the host file
 	via a temp-file + rename so a crash mid-write cannot corrupt the save.
 */
+/*	WIN32_LEAN_AND_MEAN keeps winsock out: its `#define s_addr S_un.S_addr`
+	rewrites the s_addr member of the EXEC struct in the PSY-Q <kernel.h>
+	included below, which is a compile error.  */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>			/* MoveFileExA - atomic replace, see cardFlush */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,10 +118,18 @@ static CardResult cardFlush(void)
 		remove(tmp);
 		return CARD_IO_ERROR;
 	}
-	remove(g_cardPath);				/* Windows rename() will not overwrite */
-	if (rename(tmp, g_cardPath) != 0)
+	/*	ONE operation, not remove()+rename().  The CRT rename() will not
+		overwrite on Windows, and deleting the card first means a failed or
+		interrupted rename (the file held open by antivirus, a shell preview
+		or a second instance) leaves NO card0.mcd at all - the next launch
+		would find nothing, format a blank card and lose every save.  */
+	if (!MoveFileExA(tmp, g_cardPath,
+					 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 	{
-		fprintf(stderr, "[mcrd] cannot rename %s into place\n", tmp);
+		fprintf(stderr, "[mcrd] cannot move %s into place (error %lu) - "
+						"the previous save is still intact\n",
+				tmp, (unsigned long)GetLastError());
+		remove(tmp);
 		return CARD_IO_ERROR;
 	}
 	return CARD_OK;
@@ -168,16 +181,26 @@ CardResult Card_Open(void)
 	FILE *f = fopen(g_cardPath, "rb");
 	if (f)
 	{
-		size_t got = fread(g_card, 1, CARD_IMAGE_SIZE, f);
+		size_t got   = fread(g_card, 1, CARD_IMAGE_SIZE, f);
+		int    extra = (got == CARD_IMAGE_SIZE) && (fgetc(f) != EOF);
 		fclose(f);
-		if (got == CARD_IMAGE_SIZE)
+		if (got == CARD_IMAGE_SIZE && !extra)
 		{
 			g_opened = 1;
 			return CARD_OK;			/* may still be unformatted - that is a
 									   state the game handles, not an error */
 		}
-		fprintf(stderr, "[mcrd] %s is %u bytes, not a 128KB card image - "
-						"reformatting\n", g_cardPath, (unsigned)got);
+		/*	Something is there, but it is not a 128KB card image: a .vmp
+			(128-byte header + 128KB), a padded dump, or a file another
+			process is still writing.  Formatting over it would destroy
+			whatever it is on the strength of one stderr line, so refuse and
+			report no card - the game shows its own "no memory card" screens
+			and the file is left for the user to sort out.  */
+		fprintf(stderr, "[mcrd] %s is not a 128KB card image (%u bytes%s) - "
+						"refusing to overwrite it; no card this run\n",
+				g_cardPath, (unsigned)got, extra ? "+" : "");
+		g_opened = -1;
+		return CARD_IO_ERROR;
 	}
 
 	formatImage();
@@ -206,6 +229,24 @@ CardResult Card_Unformat(void)
 /*****************************************************************************/
 /*	directory  */
 
+/*	Next block in a file's chain, or 0 at the end.
+
+	The link is DATA read out of the card image, and a card image is not
+	necessarily ours: Card_Open accepts any 128KB file, and importing real
+	PS1 saves is a documented use.  An unvalidated link indexes blockData()
+	(and dirFrame()) with up to 65535 * 8192, far outside the static image -
+	a wild read while loading and a wild WRITE while saving or deleting.  So
+	anything that does not address a real data block ends the walk; callers
+	additionally cap the hop count, because a chain that links back on
+	itself is in range yet never terminates.  */
+static int nextBlock(int b)
+{
+	unsigned next = ld16(dirFrame(b) + 0x08);
+	if (next >= (unsigned)CARD_DATA_BLOCKS)
+		return 0;				/* 0xFFFF end-of-chain, or corrupt */
+	return (int)next + 1;
+}
+
 static int findFile(const char *name)
 {
 	for (int b = 1; b <= CARD_DATA_BLOCKS; b++)
@@ -228,7 +269,10 @@ long Card_Dirents(struct DIRENTRY *out, long maxEntries)
 			continue;
 		struct DIRENTRY *e = &out[count++];
 		memset(e, 0, sizeof(*e));
-		memcpy(e->name, d + 0x0A, sizeof(e->name));
+		/*	one short of the field: the game strcpy()s this name around
+			(memcard.cpp:1073), so it must be terminated even if a corrupt
+			frame fills all 20 bytes  */
+		memcpy(e->name, d + 0x0A, sizeof(e->name) - 1);
 		e->size = (long)ld32(d + 0x04);
 		e->attr = 0x50;				/* what a real card reports for a save */
 		e->head = b - 1;
@@ -275,14 +319,14 @@ CardResult Card_DeleteFile(const char *name)
 	if (!b)
 		return CARD_NO_FILE;
 
-	while (b)
+	for (int hops = 0; b && hops < CARD_DATA_BLOCKS; hops++)
 	{
 		uint8_t *d = dirFrame(b);
 		unsigned state = ld32(d);
-		unsigned next  = ld16(d + 0x08);
+		int next = nextBlock(b);
 		st32(d, (state & 0x0F) | 0xA0);		/* 0x51/52/53 -> 0xA1/A2/A3 */
 		frameChecksum(d);
-		b = (next == 0xFFFF) ? 0 : (int)next + 1;
+		b = next;
 	}
 	return cardFlush();
 }
@@ -298,8 +342,11 @@ static CardResult fileSpan(const char *name, long ofs, long bytes,
 		return CARD_NO_FILE;
 
 	long pos = 0;					/* file offset of the current block */
+	int hops = 0;
 	while (b && bytes > 0)
 	{
+		if (hops++ >= CARD_DATA_BLOCKS)
+			return CARD_NO_FILE;	/* cyclic chain - see nextBlock */
 		if (ofs < pos + CARD_BLOCK_SIZE)
 		{
 			long start = ofs > pos ? ofs - pos : 0;
@@ -316,8 +363,7 @@ static CardResult fileSpan(const char *name, long ofs, long bytes,
 			bytes -= n;
 		}
 		pos += CARD_BLOCK_SIZE;
-		unsigned next = ld16(dirFrame(b) + 0x08);
-		b = (next == 0xFFFF) ? 0 : (int)next + 1;
+		b = nextBlock(b);
 	}
 	return bytes > 0 ? CARD_NO_FILE : CARD_OK;	/* ran off the chain */
 }
@@ -339,3 +385,4 @@ CardResult Card_WriteFile(const char *name, const void *src, long ofs, long byte
 
 uint8_t *Card_ImageForTest(void)	{ return g_card; }
 const char *Card_PathForTest(void)	{ return g_opened ? g_cardPath : NULL; }
+void Card_ResetForTest(void)		{ g_opened = 0; memset(g_card, 0, sizeof(g_card)); }

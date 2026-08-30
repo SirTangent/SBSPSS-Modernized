@@ -292,13 +292,23 @@ int CSaveLoadDatabase::getLoadStatus()
 				memcpy(&m_dataBuffer,&m_tempBuffer[256],sizeof(m_dataBuffer));
 				if(m_dataBuffer.m_headerId!=SAVELOAD_HEADERID)
 				{
-					ASSERT(!"YOUR MEMCARD SAVE IS OUT OF DATE! PLEASE DELETE IT!");
+					// Out of date save - a different SaveLoad_DataBuffer layout.
+					// This used to ASSERT and then restore it anyway, so a
+					// DEBUG build trapped and a FINAL build fed a mis-laid-out
+					// struct straight into the volume/control/game-slot
+					// setters.  Fail the load instead: the UI has a load-error
+					// path, and the PC port's boot autoload would otherwise hit
+					// this on every single launch with no way to decline.
+					MEMCARD_DBGMSG("save is out of date - not restoring it");
+					ret=FAILED;
 				}
-
-				// Loaded ok - Copy the data in
-				restoreData(m_autoloading==true);
-				ret=FINISHED_OK;
-				MEMCARD_DBGMSG("load ok :)");
+				else
+				{
+					// Loaded ok - Copy the data in
+					restoreData(m_autoloading==true);
+					ret=FINISHED_OK;
+					MEMCARD_DBGMSG("load ok :)");
+				}
 			}
 			else
 			{

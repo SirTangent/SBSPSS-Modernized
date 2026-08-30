@@ -58,6 +58,17 @@ static bool SDLCALL recordRumble(void *userdata, Uint16 low, Uint16 high)
 	return true;
 }
 
+/*	high-frequency magnitude of the most recent call that reached the
+	device (SDL dedupes identical magnitudes, so this is the last DISTINCT
+	value the shim armed)  */
+static Uint16 lastRumbleHigh(void)
+{
+	if (!g_rumbleCalls)
+		return 0;
+	int i = g_rumbleCalls < 256 ? g_rumbleCalls : 256;
+	return g_rumbleLog[i - 1].high;
+}
+
 /*	forward every pending SDL event to the shim's handler, exactly as
 	Host_VBlank does in window.cpp  */
 static void pumpEvents(void)
@@ -222,13 +233,40 @@ int main(void)
 		Port_InputFrame(vblank++);
 	check(g_rumbleCalls == before, "steady rumble reaches the driver once");
 
-	/*	small motor alone -> high-frequency full-scale  */
+	/*	Small motor.  The game sets it as (intensity & 1) off the SAME summed
+		envelope that drives the big motor, so it is ~50/50 noise that flips
+		almost every frame during any vibration.  Driving the high-frequency
+		motor straight off that bit would slam between silence and full scale
+		at ~30Hz and re-arm the device on nearly every vblank; the shim
+		smooths it the way a physical motor's inertia would.  */
 	motor[0] = 1; motor[1] = 0;
 	before = g_rumbleCalls;
 	Port_InputFrame(vblank++);
-	check(g_rumbleCalls == before + 1 &&
-		  g_rumbleLog[before].low == 0 && g_rumbleLog[before].high == 0xFFFF,
-		  "small motor -> high-frequency 0xFFFF");
+	check(g_rumbleCalls == before + 1, "small motor: first frame arms");
+	check(g_rumbleLog[before].low == 0 && g_rumbleLog[before].high < 0x4000,
+		  "small motor ramps in rather than snapping to full scale");
+
+	for (int i = 0; i < 60; i++)
+		Port_InputFrame(vblank++);
+	check(lastRumbleHigh() > 0xF000, "small motor held on reaches near full scale");
+
+	/*	The realistic pattern, as the game actually produces it: both bytes
+		come from ONE intensity value (Motor1 = intensity, Motor0 =
+		intensity & 1), so an intensity wobbling 100/101 alternates the
+		small bit every frame while the big motor barely moves.  Before the
+		smoothing/deadband fix this re-armed on every single vblank.  */
+	before = g_rumbleCalls;
+	for (int i = 0; i < 30; i++)
+	{
+		unsigned char intensity = (unsigned char)(100 + (i & 1));
+		motor[0] = (unsigned char)(intensity & 1);
+		motor[1] = intensity;
+		Port_InputFrame(vblank++);
+	}
+	check(g_rumbleCalls - before <= 15,
+		  "alternating small-motor bit does not re-arm every vblank");
+	check(lastRumbleHigh() > 0x2000 && lastRumbleHigh() < 0xE000,
+		  "alternating bit settles to a mid level, not full scale");
 
 	/*	zero -> one explicit stop, then silence  */
 	motor[0] = 0; motor[1] = 0;

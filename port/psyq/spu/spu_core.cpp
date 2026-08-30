@@ -347,8 +347,13 @@ void Spu_RenderFrames(int16_t *stereoOut, int nFrames)
 			int s = g_cdPrev + (int)((g_cdCur - g_cdPrev) * (long)g_cdPhase / 44100);
 			int cdL = (s * g_cdAtv[0] + s * g_cdAtv[2]) >> 7;
 			int cdR = (s * g_cdAtv[1] + s * g_cdAtv[3]) >> 7;
-			sumL += (cdL * g_spuCdVolL) >> 15;
-			sumR += (cdR * g_spuCdVolR) >> 15;
+			/*	64-bit for the volume step: cdL/cdR reach +-130,555 with the
+				ATV matrix at full scale, which times a 0x7FFF CD volume
+				overflows a 32-bit int.  The game's own 127/32000 programming
+				lands inside the range but within 1% of it, and
+				Spu_SetCdAtv/SpuSetCommonAttr accept the full register range. */
+			sumL += (int)(((int64_t)cdL * g_spuCdVolL) >> 15);
+			sumR += (int)(((int64_t)cdR * g_spuCdVolR) >> 15);
 		}
 
 		sumL = (sumL * g_spuMasterVolL) >> 14;

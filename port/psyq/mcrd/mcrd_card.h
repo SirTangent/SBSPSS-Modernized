@@ -49,8 +49,11 @@ CardResult	Card_DeleteFile(const char *name);
 CardResult	Card_ReadFile(const char *name, void *dst, long ofs, long bytes);
 CardResult	Card_WriteFile(const char *name, const void *src, long ofs, long bytes);
 
-/*	Test access: the raw image and the resolved path (NULL before Card_Open).  */
+/*	Test access: the raw image, the resolved path (NULL before Card_Open),
+	and a reset that drops the one-shot Card_Open latch so a test can point
+	SBSP_SAVE_DIR somewhere else and open again.  */
 uint8_t		*Card_ImageForTest(void);
 const char	*Card_PathForTest(void);
+void		Card_ResetForTest(void);
 
 #endif

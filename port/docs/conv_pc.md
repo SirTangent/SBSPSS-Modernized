@@ -262,6 +262,18 @@ behavioural divergence was added on user request:
     shim card (pad-script note in debug-tools.md par. 5).  PSX regression
     build re-run clean after the change.
 
+22. **`source/memcard/saveload.cpp` (out-of-date save)** - a save whose
+    MD5 verified but whose `m_headerId` did not match `SAVELOAD_HEADERID`
+    used to `ASSERT(!"YOUR MEMCARD SAVE IS OUT OF DATE!")` and then call
+    `restoreData()` on it regardless: a hard trap in DEBUG, and in FINAL
+    the volume / control-style / vibration / game-slot setters all fed
+    from a struct the code had just identified as a different layout.
+    The load now fails instead (the save/load UI already has a
+    load-error path).  Same latent-bug class as entry #13, and load-
+    bearing for entry #21: the boot autoload would otherwise walk into
+    it on every single launch, before any UI exists to decline.  Found
+    by the M6 code-review pass.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
