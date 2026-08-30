@@ -362,6 +362,44 @@ int main()
 		checkPx(100, 100, 0x7FFF, "5xxx5xxx vertex did not fake a terminator");
 	}
 
+	/* --- isrgb24 display unpack (M7 FMV) ---------------------------------- */
+	{
+		resetEnv();
+
+		/*	15bpp baseline through the shared unpack.  */
+		DISPENV disp;
+		SetDefDispEnv(&disp, 8, 16, 320, 240);
+		PutDispEnv(&disp);
+		g_vram[16][8] = (uint16_t)((0x1F << 10) | (0x08 << 5) | 0x11);
+		unsigned char rgb[3];
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[0] == (0x11 << 3) && rgb[1] == (0x08 << 3) && rgb[2] == 0xF8,
+			  "display unpack: 15bpp channels x8");
+
+		/*	24bpp: pixels 0,1 = (R0 G0 B0)(R1 G1 B1) packed little-endian
+			into three halfwords: G0R0, R1B0, B1G1.  disp.w is in PIXELS
+			(fmv.cpp pre-divides by 3/2); disp.x in halfwords.  */
+		disp.isrgb24 = 1;
+		PutDispEnv(&disp);
+		g_vram[16][8]  = (uint16_t)(0x22 << 8 | 0x11);	/* G0 R0 */
+		g_vram[16][9]  = (uint16_t)(0x44 << 8 | 0x33);	/* R1 B0 */
+		g_vram[16][10] = (uint16_t)(0x66 << 8 | 0x55);	/* B1 G1 */
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[0] == 0x11 && rgb[1] == 0x22 && rgb[2] == 0x33,
+			  "display unpack: 24bpp pixel 0 (even byte phase)");
+		GPU_ReadDisplayPixelRGB(1, 0, rgb);
+		check(rgb[0] == 0x44 && rgb[1] == 0x55 && rgb[2] == 0x66,
+			  "display unpack: 24bpp pixel 1 (odd byte phase)");
+
+		/*	Leaving 24bpp mode restores the 15bpp path (PutDispEnv copies
+			isrgb24 every time - the game's next VidSwapDraw does this).  */
+		disp.isrgb24 = 0;
+		PutDispEnv(&disp);
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[2] == ((0x22 >> 2) << 3),
+			  "display unpack: isrgb24 clears on the next PutDispEnv");
+	}
+
 	if (g_failures)
 	{
 		std::printf("gpu test FAILED (%d)\n", g_failures);

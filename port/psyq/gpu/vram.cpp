@@ -108,7 +108,27 @@ extern "C" DISPENV *PutDispEnv(DISPENV *env)
 	g_gpu.dispH = env->disp.h;
 	g_gpu.screenX = env->screen.x;
 	g_gpu.screenY = env->screen.y;
+	g_gpu.dispRgb24 = env->isrgb24;
 	return env;
+}
+
+extern "C" void GPU_ReadDisplayPixelRGB(int x, int y, unsigned char rgb[3])
+{
+	int vy = (g_gpu.dispY + y) & 0x1FF;
+	if (g_gpu.dispRgb24)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			int b = x * 3 + i;
+			uint16_t hw = g_vram[vy][(g_gpu.dispX + (b >> 1)) & 0x3FF];
+			rgb[i] = (unsigned char)((b & 1) ? (hw >> 8) : (hw & 0xFF));
+		}
+		return;
+	}
+	uint16_t px = g_vram[vy][(g_gpu.dispX + x) & 0x3FF];
+	rgb[0] = (unsigned char)((px & 0x1F) << 3);
+	rgb[1] = (unsigned char)(((px >> 5) & 0x1F) << 3);
+	rgb[2] = (unsigned char)(((px >> 10) & 0x1F) << 3);
 }
 
 extern "C" DRAWENV *PutDrawEnv(DRAWENV *env)
