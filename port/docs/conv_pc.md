@@ -259,8 +259,8 @@ behavioural divergence was added on user request:
     path, and Load Game/save UI are otherwise unchanged.  The card
     location follows the usual resolution (`--save-dir`/`SBSP_SAVE_DIR`,
     else `%APPDATA%\SBSPSS`).  Boot cost: ~10 emulated vblanks with the
-    shim card (pad-script note in debug-tools.md par. 5).  PSX regression
-    build re-run clean after the change.
+    shim card, so pad scripts timed across boot shift by that much.
+    PSX regression build re-run clean after the change.
 
 22. **`source/memcard/saveload.cpp` (out-of-date save)** - a save whose
     MD5 verified but whose `m_headerId` did not match `SAVELOAD_HEADERID`

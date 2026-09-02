@@ -71,9 +71,10 @@ static void put16(FILE *f, uint16_t v)	{ fwrite(&v, 2, 1, f); }
 
 static void dumpDisplayBMP(unsigned long vblank)
 {
-	int w = g_gpu.dispW ? g_gpu.dispW : 512;
+	int w = g_gpu.dispW ? g_gpu.dispW : 512;	/* pixels in BOTH modes:
+												   fmv.cpp pre-divides for
+												   isrgb24 */
 	int h = g_gpu.dispH ? g_gpu.dispH : 256;
-	int x0 = g_gpu.dispX, y0 = g_gpu.dispY;
 
 	char path[512];
 	snprintf(path, sizeof(path), "%s/sbsp_frame_%lu.bmp", g_dumpDir, vblank);
@@ -100,10 +101,11 @@ static void dumpDisplayBMP(unsigned long vblank)
 	{
 		for (int x = 0; x < w; x++)
 		{
-			uint16_t px = g_vram[(y0 + y) & 0x1FF][(x0 + x) & 0x3FF];
-			row[x * 3 + 0] = (unsigned char)(((px >> 10) & 0x1F) << 3);	/* B */
-			row[x * 3 + 1] = (unsigned char)(((px >> 5) & 0x1F) << 3);	/* G */
-			row[x * 3 + 2] = (unsigned char)((px & 0x1F) << 3);			/* R */
+			unsigned char rgb[3];
+			GPU_ReadDisplayPixelRGB(x, y, rgb);		/* 15bpp or isrgb24 */
+			row[x * 3 + 0] = rgb[2];	/* B */
+			row[x * 3 + 1] = rgb[1];	/* G */
+			row[x * 3 + 2] = rgb[0];	/* R */
 		}
 		fwrite(row, 1, rowBytes, f);
 	}

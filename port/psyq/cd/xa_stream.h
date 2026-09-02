@@ -12,6 +12,7 @@
 
 /*	engine entry points, called from cd.cpp's command dispatch  */
 void XaStream_SetFilter(int file, int chan);
+void XaStream_GetFilter(int *file, int *chan);	/* str_stream's SF gate */
 void XaStream_SetMode(int mode);
 void XaStream_ReadS(const CdlLOC *pos);
 void XaStream_Pause(void);
@@ -23,6 +24,8 @@ extern "C" void Port_CdVblank(int vblankHz);
 /*	provided by cd.cpp  */
 extern CdlCB g_cdReadyCallback;
 int Port_CdXaTrackInfo(FILE **fp, long *startLBA, long *sectors);
+int Port_CdFileForLBA(long lba, FILE **fp, long *startLBA, long *sectors,
+					  int *bytesPerSector, const char **name);
 
 /*	test support: drop the cached track binding and any playing stream
 	(used with cd.cpp's Port_CdRebuildDirForTest after re-pointing

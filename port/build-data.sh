@@ -41,4 +41,19 @@ if [ ! -f "$IXA_DST" ] || [ "$IXA_SRC" -nt "$IXA_DST" ]; then
     echo "Staged $IXA_DST"
 fi
 
+# Stage the FMV movies (M7) - raw-XA .STR files, same layout as the IXA.
+# Not LFS-tracked, but keep the same size sanity guard for uniformity.
+for movie in thq climax intro demo; do
+    STR_SRC="data/CDData/$movie.str"
+    STR_DST="out/$TERRITORY/$VERSION/version/CD/$(echo "$movie" | tr a-z A-Z).STR"
+    if [ ! -f "$STR_SRC" ] || [ "$(stat -c%s "$STR_SRC")" -lt 1048576 ]; then
+        echo "ERROR: $STR_SRC is missing or truncated." >&2
+        exit 1
+    fi
+    if [ ! -f "$STR_DST" ] || [ "$STR_SRC" -nt "$STR_DST" ]; then
+        cp "$STR_SRC" "$STR_DST"
+        echo "Staged $STR_DST"
+    fi
+done
+
 echo "Data build complete: out/$TERRITORY"

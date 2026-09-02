@@ -1,5 +1,7 @@
 # Build outputs and local debris (Win11 port work)
 out/
+# synthetic-disc scratch dirs the unit tests stage at the repo root
+*_test_tmp/
 data/Scripts/defs/trans.scr
 *.stackdump
 .idea/

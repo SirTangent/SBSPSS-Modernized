@@ -108,7 +108,27 @@ extern "C" DISPENV *PutDispEnv(DISPENV *env)
 	g_gpu.dispH = env->disp.h;
 	g_gpu.screenX = env->screen.x;
 	g_gpu.screenY = env->screen.y;
+	g_gpu.dispRgb24 = env->isrgb24;
 	return env;
+}
+
+extern "C" void GPU_ReadDisplayPixelRGB(int x, int y, unsigned char rgb[3])
+{
+	int vy = (g_gpu.dispY + y) & 0x1FF;
+	if (g_gpu.dispRgb24)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			int b = x * 3 + i;
+			uint16_t hw = g_vram[vy][(g_gpu.dispX + (b >> 1)) & 0x3FF];
+			rgb[i] = (unsigned char)((b & 1) ? (hw >> 8) : (hw & 0xFF));
+		}
+		return;
+	}
+	uint16_t px = g_vram[vy][(g_gpu.dispX + x) & 0x3FF];
+	rgb[0] = (unsigned char)((px & 0x1F) << 3);
+	rgb[1] = (unsigned char)(((px >> 5) & 0x1F) << 3);
+	rgb[2] = (unsigned char)(((px >> 10) & 0x1F) << 3);
 }
 
 extern "C" DRAWENV *PutDrawEnv(DRAWENV *env)
@@ -226,7 +246,38 @@ extern "C" int ClearImage(RECT *rect, u_char r, u_char g, u_char b)
 	uint16_t col = (uint16_t)(((r >> 3) & 0x1F)
 				 | (((g >> 3) & 0x1F) << 5)
 				 | (((b >> 3) & 0x1F) << 10));
-	Raster_FillRect15(rect->x, rect->y, rect->w, rect->h, col);
+
+	/*	libgpu CLAMPS the rect before emitting the GP0(02h) fill - it does
+		not pass it verbatim (disassembled from LIBGPU.LIB's ClearImage
+		packet builder): w -> [0,1023], h -> [0,511].  Without this,
+		fmv.cpp's teardown ClearImage({0,0,512,512}) would mask h to 0 in
+		the raw fill rules below and clear NOTHING, leaving the movie's
+		RGB24 bytes on screen as garbage when playback stops (issue #26).
+		The raw GP0 masking stays in Raster_FillRect15 - it is correct for
+		the command level, wrong for the library call.  (libgpu also
+		reroutes x not 64-aligned through a GP0(60h) draw, which clips by
+		the DRAW env - no game caller does that; log it.)
+
+		A rect crossing the VRAM edge then CLIPS instead of wrapping:
+		actor.cpp's cache wipe ClearImage({512,256,2048,254}, green) means
+		"to the right edge" - clamp alone gives x=512 w=1023, and a
+		wrapping fill would paint the green cache marker across the
+		framebuffer columns 0..511, a green overlay on every loading
+		screen (the retail game never shows that, so the console result
+		of this exact call cannot have wrapped into the display).  */
+	int x = rect->x & 0x3F0;
+	int y = rect->y & 0x1FF;
+	int w = rect->w < 0 ? 0 : (rect->w > 1023 ? 1023 : (int)rect->w);
+	int h = rect->h < 0 ? 0 : (rect->h > 511 ? 511 : (int)rect->h);
+	if (x + w > 1024)
+		w = 1024 - x;
+	if (y + h > 512)
+		h = 512 - y;
+	if (rect->x & 0x3F)
+		PSYQ_LOG_ONCE_KEYED(60, "[gpu] ClearImage x=%d not 64-aligned - "
+							"libgpu would draw-clip this, shim fills raw\n",
+							rect->x);
+	Raster_FillRect15(x, y, w, h, col);
 	return 0;
 }
 

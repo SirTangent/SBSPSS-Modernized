@@ -40,6 +40,9 @@ struct GpuState
 	int		dispX, dispY, dispW, dispH;	/* DISPENV.disp - VRAM region scanned out */
 	int		screenX, screenY;			/* DISPENV.screen - CRT placement (PAL y offset) */
 	int		dispMask;					/* SetDispMask: 1 = video enabled */
+	int		dispRgb24;					/* DISPENV.isrgb24: scan out 24bpp (FMV).
+										   dispW is then in PIXELS - fmv.cpp
+										   pre-converts (disp.w*2/3) itself. */
 };
 
 extern GpuState g_gpu;
@@ -79,6 +82,12 @@ void Raster_Triangle(const RasterVtx *v0, const RasterVtx *v1, const RasterVtx *
 					 const RasterCfg *cfg);
 void Raster_Line(const RasterVtx *a, const RasterVtx *b, const RasterCfg *cfg);
 void Raster_FillRect15(int x, int y, int w, int h, uint16_t col15);	/* raw, no clip/mask */
+
+/*	vram.cpp: unpack one DISPLAYED pixel (x,y relative to the disp origin)
+	to RGB888, honoring dispRgb24 - the single unpack shared by the BMP
+	dumper and gpu_test, mirroring the present.frag math.  15bpp expands
+	5-bit channels by <<3 (the dumper's historical scaling).  */
+extern "C" void GPU_ReadDisplayPixelRGB(int x, int y, unsigned char rgb[3]);
 
 /* host hooks (window.cpp; safe no-ops before the window exists).
    extern "C": pump.cpp forward-declares Host_VBlank inside an extern "C"

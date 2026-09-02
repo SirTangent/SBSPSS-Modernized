@@ -153,7 +153,7 @@ static uint32_t			s_frame;						/* frame slot cursor */
 
 static int				s_vramInShaderLayout;	/* image layout tracking */
 
-struct PushConsts { int32_t disp[4]; int32_t mask; };
+struct PushConsts { int32_t disp[4]; int32_t mask; int32_t rgb24; };
 
 #define CHECK(expr)															\
 	do {																	\
@@ -936,6 +936,7 @@ void VkPresent_Frame(void)
 	pc.disp[2] = g_gpu.dispW ? g_gpu.dispW : 512;
 	pc.disp[3] = g_gpu.dispH ? g_gpu.dispH : 256;
 	pc.mask    = g_gpu.dispMask;
+	pc.rgb24   = g_gpu.dispRgb24;
 	p_vkCmdPushConstants(cmd, s_pipeLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
 						 0, sizeof(pc), &pc);
 

@@ -83,20 +83,38 @@ int main()
 		checkPx(100, 200, 0x1234, "MoveImage source intact");
 	}
 
-	/* --- ClearImage with a hardware-oversized rect (actor.cpp:299) -------- */
+	/* --- ClearImage oversized rects: libgpu CLAMPS, then GP0(02h) masks ---
+		Disassembled from LIBGPU.LIB's ClearImage packet builder: w -> [0,1023],
+		h -> [0,511] BEFORE the fill command.  The old assertion here ("w=2048
+		masks to a no-op") modelled the raw hardware rule at the library layer,
+		which is what left FMV frames on screen as garbage at movie teardown
+		(fmv.cpp clears {0,0,512,512} - h=512 must clear 511 rows, not 0).  */
 	{
 		resetEnv();
 		RECT big = { 512, 256, 2048, 254 };
 		ClearImage(&big, 255, 0, 0);
-		/*	hardware masks the fill width to 10 bits: 2048 & 0x3FF == 0, so
-			this call is a no-op on the console too - it must neither crash
-			nor overrun here, and must not fill anything  */
-		checkPx(512, 256, 0x0000, "ClearImage w=2048 masks to a no-op (hardware)");
-		checkPx(0, 0, 0x0000, "ClearImage did not touch origin");
+		/*	w clamps to 1023 (libgpu), then clips to the VRAM edge instead of
+			wrapping - actor.cpp's green cache wipe must never cross into the
+			framebuffer columns (the level-loading green-overlay regression)  */
+		checkPx(512, 256, 0x001F, "ClearImage w=2048 fills from its origin");
+		checkPx(1023, 256, 0x001F, "ClearImage w=2048 fills to the right edge");
+		checkPx(0, 256, 0x0000, "ClearImage does NOT wrap into the framebuffer");
+		checkPx(0, 0, 0x0000, "ClearImage did not touch rows above the rect");
+		checkPx(0, 510, 0x0000, "ClearImage h=254 stops at row 509");
 
 		RECT ok = { 512, 256, 64, 32 };
 		ClearImage(&ok, 255, 0, 0);
 		checkPx(512, 256, 0x001F, "ClearImage in-range rect fills");
+
+		/*	the FMV teardown shape: h=512 clamps to 511 (rows 0..510)  */
+		resetEnv();
+		RECT mark = { 0, 511, 16, 1 };
+		ClearImage(&mark, 0, 0, 255);
+		RECT fmv = { 0, 0, 512, 512 };
+		ClearImage(&fmv, 0, 255, 0);
+		checkPx(0, 0, 0x03E0, "ClearImage h=512 clears the top row");
+		checkPx(511, 510, 0x03E0, "ClearImage h=512 clears row 510");
+		checkPx(0, 511, 0x7C00, "ClearImage h=512 leaves row 511 (clamp to 511)");
 	}
 
 	/* --- POLY_F4 flat fill + drawing offset + clip ------------------------ */
@@ -360,6 +378,44 @@ int main()
 		GPU_ExecWords(shaded, 9);
 		checkPx(45, 120, 0x001F, "shaded polyline segment 1");
 		checkPx(100, 100, 0x7FFF, "5xxx5xxx vertex did not fake a terminator");
+	}
+
+	/* --- isrgb24 display unpack (M7 FMV) ---------------------------------- */
+	{
+		resetEnv();
+
+		/*	15bpp baseline through the shared unpack.  */
+		DISPENV disp;
+		SetDefDispEnv(&disp, 8, 16, 320, 240);
+		PutDispEnv(&disp);
+		g_vram[16][8] = (uint16_t)((0x1F << 10) | (0x08 << 5) | 0x11);
+		unsigned char rgb[3];
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[0] == (0x11 << 3) && rgb[1] == (0x08 << 3) && rgb[2] == 0xF8,
+			  "display unpack: 15bpp channels x8");
+
+		/*	24bpp: pixels 0,1 = (R0 G0 B0)(R1 G1 B1) packed little-endian
+			into three halfwords: G0R0, R1B0, B1G1.  disp.w is in PIXELS
+			(fmv.cpp pre-divides by 3/2); disp.x in halfwords.  */
+		disp.isrgb24 = 1;
+		PutDispEnv(&disp);
+		g_vram[16][8]  = (uint16_t)(0x22 << 8 | 0x11);	/* G0 R0 */
+		g_vram[16][9]  = (uint16_t)(0x44 << 8 | 0x33);	/* R1 B0 */
+		g_vram[16][10] = (uint16_t)(0x66 << 8 | 0x55);	/* B1 G1 */
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[0] == 0x11 && rgb[1] == 0x22 && rgb[2] == 0x33,
+			  "display unpack: 24bpp pixel 0 (even byte phase)");
+		GPU_ReadDisplayPixelRGB(1, 0, rgb);
+		check(rgb[0] == 0x44 && rgb[1] == 0x55 && rgb[2] == 0x66,
+			  "display unpack: 24bpp pixel 1 (odd byte phase)");
+
+		/*	Leaving 24bpp mode restores the 15bpp path (PutDispEnv copies
+			isrgb24 every time - the game's next VidSwapDraw does this).  */
+		disp.isrgb24 = 0;
+		PutDispEnv(&disp);
+		GPU_ReadDisplayPixelRGB(0, 0, rgb);
+		check(rgb[2] == ((0x22 >> 2) << 3),
+			  "display unpack: isrgb24 clears on the next PutDispEnv");
 	}
 
 	if (g_failures)
