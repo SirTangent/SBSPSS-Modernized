@@ -433,6 +433,7 @@ $(OBJ_DIR)/%.o : $(SOURCE_DIR)/%.cpp
 arse:  $(SOURCE_DIR)/system/$(VERSION)/$(TERRITORY)/$(FILE_SYSTEM)/info.mip
 
 $(SOURCE_DIR)/system/$(VERSION)/$(TERRITORY)/$(FILE_SYSTEM)/info.mip : makefile.gaz $(USER_VAR_FILE)
+	@$(MKDIR) -p $(dir $@)
 	@$(REDIR) $@ \
 '$(TAB)section		.rdata'	\
 '$(TAB)global			INF_Version' \
