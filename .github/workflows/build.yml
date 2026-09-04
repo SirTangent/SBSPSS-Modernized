@@ -82,6 +82,7 @@ jobs:
             mingw-w64-i686-gcc
             mingw-w64-i686-cmake
             mingw-w64-i686-ninja
+            mingw-w64-i686-sdl3
           cache: true
 
       - name: Build PC port (debug)
