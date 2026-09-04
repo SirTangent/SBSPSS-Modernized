@@ -1,0 +1,132 @@
+name: Build & test
+
+on:
+  pull_request:
+    branches: [SBSP-Win11]
+  push:
+    branches: [SBSP-Win11]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERRITORY: USA
+  VERSION: DEBUG
+
+jobs:
+  # M0 data pipeline: BigLump.Bin + generated headers (BigLump.h, Sprites.h,
+  # trans.h, ...) that gate both the PC and PSX configure/build steps. Runs
+  # the vintage Win32 converter EXEs (tools/Data/bin, tools/psyq/bin) via
+  # MSYS2 make/perl - no MinGW compiler needed here, just the base runtime.
+  data:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: make perl
+          cache: true
+
+      - name: Build data (BigLump.Bin + generated headers)
+        run: bash port/build-data.sh "$TERRITORY" "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
+          path: out/
+          retention-days: 3
+
+  # PC (Win32) port: build via the mingw32 CMake presets, then run every
+  # test executable headlessly (sbsp.exe itself, the windowed game, is
+  # deliberately excluded).
+  pc-build-test:
+    needs: data
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
+          path: out/
+
+      # CMakePresets.json hardcodes C:/msys64/mingw32/bin/ninja.exe as
+      # CMAKE_MAKE_PROGRAM, so location must match for cmake to find it.
+      - uses: msys2/setup-msys2@v2
+        with:
+          location: C:\
+          msystem: MINGW32
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+          cache: true
+
+      - name: Build PC port (debug)
+        run: bash port/build-pc.sh debug
+
+      - name: Run tests
+        run: |
+          set -e
+          for exe in \
+              sbsp_headless gte_trig_test gte_test gpu_test adpcm_test \
+              spu_test xm_test pad_test mcrd_test xa_test mdec_test \
+              vlc3_test str_test fmv_pipeline_test
+          do
+              echo "=== $exe ==="
+              ./port/build/debug/"$exe".exe
+          done
+
+  # Original PlayStation executable (Spongey.cpe), linked with the vintage
+  # PSY-Q toolchain committed under tools/psyq/bin. No MinGW needed - just
+  # MSYS2 base driving those 32-bit PE console tools directly. Only links
+  # (`dirs link`); pressing a disc image needs 16-bit tools that cannot run
+  # on 64-bit Windows at all, so that stays a local/manual step.
+  psx-build:
+    needs: data
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
+          path: out/
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          install: make
+          cache: true
+
+      - name: Build PSX executable (Spongey.cpe)
+        run: bash port/build-psx.sh "$TERRITORY" "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbsp-psx-${{ env.TERRITORY }}-${{ env.VERSION }}
+          path: out/${{ env.TERRITORY }}/${{ env.VERSION }}/version/CD/Spongey.cpe
+          retention-days: 7
