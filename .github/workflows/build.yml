@@ -71,9 +71,12 @@ jobs:
 
       # CMakePresets.json hardcodes C:/msys64/mingw32/bin/ninja.exe as
       # CMAKE_MAKE_PROGRAM, so location must match for cmake to find it.
+      # windows-latest already has MSYS2 installed there - release: false
+      # reuses it instead of trying (and failing) a fresh install over it.
       - uses: msys2/setup-msys2@v2
         with:
           location: C:\
+          release: false
           msystem: MINGW32
           install: >-
             mingw-w64-i686-gcc
