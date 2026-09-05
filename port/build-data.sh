@@ -15,6 +15,20 @@ cd "$(dirname "$0")/.."
 TERRITORY="${1:-USA}"
 VERSION="${2:-DEBUG}"
 
+GAME_DATA_SCR="data/DataCache.scr"
+BIGLUMP_BIN="out/$TERRITORY/$VERSION/version/CD/BIGLUMP.BIN"
+BIGLUMP_INC="out/$TERRITORY/include/BigLump.h"
+
+# makefile.gfx:709 makes BigLump.Bin depend on $(GFX_DATA_OUT) alone, not on
+# DataCache.scr.  So editing that script - or repairing its line endings -
+# leaves the previous BigLump.Bin/BigLump.h in place and make skips the rule
+# without a word, keeping stale file equates.  Drop them when the script is
+# newer so the generated equates always match it.
+if [ -f "$BIGLUMP_BIN" ] && [ "$GAME_DATA_SCR" -nt "$BIGLUMP_BIN" ]; then
+    echo "$GAME_DATA_SCR is newer than $BIGLUMP_BIN - forcing a BigLump rebuild"
+    rm -f "$BIGLUMP_BIN" "$BIGLUMP_INC"
+fi
+
 # port/tools first: its modern lznp.exe must shadow the 16-bit tools/lznp.exe.
 # PATH and Path both overridden (globals.mak exports both spellings), and every
 # tool variable globals.mak pins to the vintage tools/cygwin binaries is
@@ -25,6 +39,23 @@ make -r -f makefile.gfx \
     "PATH=$BUILD_PATH" "Path=$BUILD_PATH" \
     MKDIR=mkdir ECHO=echo MV=mv DATE=date SED=sed \
     RMDIR=rmdir LS=ls "ATTRIB=chmod +w"
+
+# MkData exits 0 even when it parses nothing.  Its script reader is CRLF-only
+# (Utils/MkData/MkData.cpp GotoNextLine scans for CR then skips two bytes), so
+# an LF-only data/DataCache.scr makes it bail after the opening bank line and
+# emit a stub BigLump.h holding just SYSTEM_CACHE.  That surfaces much later as
+# hundreds of "'SCRIPTS_..._DAT' was not declared in this scope" errors in the
+# PC/PSX build, so fail here instead, where the cause is still visible.
+EQUATES=$(tr -cd ',' < "$BIGLUMP_INC" 2>/dev/null | wc -c)
+if [ "$EQUATES" -lt 100 ]; then
+    echo "ERROR: $BIGLUMP_INC has only $EQUATES file equates - MkData read" >&2
+    echo "       almost nothing from $GAME_DATA_SCR." >&2
+    echo "       That file must have CRLF line endings.  Check with:" >&2
+    echo "         od -c $GAME_DATA_SCR | head -2" >&2
+    echo "       and restore it with:" >&2
+    echo "         rm $GAME_DATA_SCR && git checkout -- $GAME_DATA_SCR" >&2
+    exit 1
+fi
 
 # Stage the XA speech stream next to BIGLUMP.BIN (M6) - on PSX this is
 # makefile.gaz's cddata rule copying it into the CD image. Guard against an

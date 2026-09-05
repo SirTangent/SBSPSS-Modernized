@@ -5,4 +5,9 @@
 # tools/MkData.exe's script parser (Utils/MkData/MkData.cpp GotoNextLine) scans
 # for CR and then skips two bytes, so an LF-only DataCache.scr makes it bail
 # after the first line and emit an empty out/<TERRITORY>/include/BigLump.h.
-data/DataCache.scr text eol=crlf
+# The blob is stored WITH CRLF and -text keeps Git out of it in both
+# directions, so every platform and autocrlf setting gets identical bytes.
+# "text eol=crlf" is not enough: it only takes effect when Git writes the
+# file, so an existing checkout keeps a stale LF copy across a pull or branch
+# switch, because the blob is unchanged and Git never re-materialises it.
+data/DataCache.scr -text
