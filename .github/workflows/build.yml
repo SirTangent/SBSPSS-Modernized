@@ -83,8 +83,18 @@ jobs:
             mingw-w64-i686-gcc
             mingw-w64-i686-cmake
             mingw-w64-i686-ninja
-            mingw-w64-i686-sdl3
           cache: true
+
+      # MSYS2 is retiring the deprecated 32-bit environment and dropped
+      # mingw-w64-i686-sdl3 from the mingw32 index (242 i686 packages went
+      # between 2026-06 and 2026-09; gcc/cmake/ninja survive). The package
+      # file is still on the mirror, so pin it by URL - this also keeps CI
+      # on the same SDL3 the local toolchain builds against. Its deps
+      # (gcc-libs, libiconv, vulkan-loader) are still indexed.
+      - name: Install SDL3 (no longer in the mingw32 index)
+        run: |
+          pacman -U --noconfirm \
+            https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-sdl3-3.4.10-1-any.pkg.tar.zst
 
       - name: Build PC port (debug)
         run: bash port/build-pc.sh debug
