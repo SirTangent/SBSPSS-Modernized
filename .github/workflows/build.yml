@@ -29,9 +29,26 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # data/CDData/Track1.Ixa is 133MB of Git LFS. checkout's lfs: true would
+      # re-fetch it every run and drain the account's LFS bandwidth quota (1GiB
+      # /month on the free tier); once that's gone, checkout AND plain cloning
+      # fail for everyone until a data pack is bought. Cache the objects keyed
+      # on their oids instead, so the 133MB is paid once and the key rotates
+      # by itself if the asset ever changes.
+      - name: Resolve LFS object ids
+        shell: bash
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-assets-id
+
+      - uses: actions/cache@v6
         with:
-          lfs: true
+          path: .git/lfs/objects
+          key: lfs-${{ hashFiles('.lfs-assets-id') }}
+
+      - name: Fetch LFS objects
+        shell: bash
+        run: git lfs pull
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -42,7 +59,7 @@ jobs:
       - name: Build data (BigLump.Bin + generated headers)
         run: bash port/build-data.sh "$TERRITORY" "$VERSION"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
           path: out/
@@ -62,9 +79,9 @@ jobs:
       SDL_VIDEODRIVER: dummy
       SDL_AUDIODRIVER: dummy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
           path: out/
@@ -100,16 +117,15 @@ jobs:
       - name: Build PC port (debug)
         run: bash port/build-pc.sh debug
 
+      # Globbed rather than listed, so a new sbsp_shim_test() in CMakeLists.txt
+      # is picked up automatically instead of being built and silently never
+      # run. sbsp.exe - the windowed game - never matches *_test.exe.
       - name: Run tests
         run: |
           set -e
-          for exe in \
-              sbsp_headless gte_trig_test gte_test gpu_test adpcm_test \
-              spu_test xm_test pad_test mcrd_test xa_test mdec_test \
-              vlc3_test str_test fmv_pipeline_test
-          do
-              echo "=== $exe ==="
-              ./port/build/debug/"$exe".exe
+          for exe in port/build/debug/sbsp_headless.exe port/build/debug/*_test.exe; do
+              echo "=== $(basename "$exe") ==="
+              "$exe"
           done
 
   # Original PlayStation executable (Spongey.cpe), linked with the vintage
@@ -125,9 +141,9 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sbsp-data-${{ env.TERRITORY }}-${{ env.VERSION }}
           path: out/
@@ -135,13 +151,13 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MSYS
-          install: make
+          install: make perl
           cache: true
 
       - name: Build PSX executable (Spongey.cpe)
         run: bash port/build-psx.sh "$TERRITORY" "$VERSION"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbsp-psx-${{ env.TERRITORY }}-${{ env.VERSION }}
           path: out/${{ env.TERRITORY }}/${{ env.VERSION }}/version/CD/Spongey.cpe
