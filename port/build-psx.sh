@@ -21,6 +21,15 @@ cp -f tools/psyq/bin/egcs/sn.ini sn.ini
 # The PSY-Q tools take DOS-style /flags; stop MSYS2 from rewriting them as paths.
 export MSYS2_ARG_CONV_EXCL='*'
 
+# GNU Make remakes included makefiles (the .d autodependency files, via
+# `include $(ALL_CODE_DEPS)`) before running any explicit goal - including
+# 'dirs' below. That first dep-file compile writes its scratch output
+# through $(TEMP_DIR), which only the 'dirs' target creates, so on a truly
+# fresh out/ tree (no prior local build ever populated it) the very first
+# .d rule fails before 'dirs' gets a chance to run. Every established dev
+# checkout has this directory already, which is why it's gone unnoticed.
+mkdir -p "out/$TERRITORY/$VERSION/CD/temp"
+
 BUILD_PATH="/usr/bin:$PWD/port/tools:$PWD/tools:$PWD/tools/psyq/bin:$PWD/tools/psyq/bin/egcs"
 
 # Targets 'dirs link' only: the full 'all' also runs 'cddata' (CPE->BIN,
