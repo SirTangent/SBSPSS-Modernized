@@ -341,6 +341,30 @@ after it).  The guard is `port/build-psx.cmd` + a SHA-256 compare of
     224/256 `MemNodeCount`.  Header-only change inside the block the
     PlayStation build skips.
 
+28. **`source/game/game.cpp` (`SBSP_AUTOPLAY` hooks)** - three arms, each
+    with a `#line` re-sync (two `SYSTEM_DBGMSG` sites follow them):
+    - `initLevel()`, after the retail bonus-level timer block: `finish=N`
+      arms that same `m_levelHasTimer`/`m_timer` path for *every* level,
+      so the unmodified countdown in `think_playing()` (beeps, then
+      `s_levelFinished`) ends the level N vblanks after play starts - no
+      new finish logic.  `lives=N` / `continues=N` write
+      `CGameSlotManager::getSlotData()->m_lives/m_continues` directly
+      (public `typedef struct`, the idiom `game.cpp:319` already uses) -
+      once, at the first `initLevel()`: a death restarts the level through
+      `initLevel()` again (`pmdead.cpp` `m_lives--` + `restartlevel()`),
+      so the shim's accessor returns -1 after its first answer.
+    - the level-finished block, after the hi-spatula-count check:
+      `spatulas=all` records every spatula in the save slot
+      (`setSpatulaCollectedCount(total,total)`) - slot bookkeeping only,
+      the player's carried count is untouched.
+    - `think_playing()`, after the timer block: `die=N` calls the public
+      `CPlayer::dieYouPorousFreak()` when the shim's
+      `Port_AutoplayDie(m_player->isDead())` says so - one death per
+      observed death->respawn cycle, so N is exactly N life-losses and
+      game-over is reached through the retail `pmdead.cpp` path.
+    Parser and accessors: `port/psyq/host/autoplay.cpp`; prototypes in
+    `asmport.h`.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
