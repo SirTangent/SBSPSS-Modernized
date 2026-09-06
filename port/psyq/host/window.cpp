@@ -41,6 +41,7 @@ static unsigned long g_exitAfter;		/* 0 = off */
 static unsigned long g_dumpAt[16];
 static int			g_dumpCount;
 static const char	*g_dumpDir = ".";
+static int			g_frameCrc;			/* SBSP_FRAME_CRC=1: [frame] line per vblank */
 
 static void parseTooling(void)
 {
@@ -55,6 +56,9 @@ static void parseTooling(void)
 	const char *dir = getenv("SBSP_DUMP_DIR");
 	if (dir && *dir)
 		g_dumpDir = _strdup(dir);
+
+	const char *fc = getenv("SBSP_FRAME_CRC");
+	g_frameCrc = fc && *fc && *fc != '0';
 
 	const char *d = getenv("SBSP_DUMP_FRAMES");
 	while (d && *d && g_dumpCount < 16)
@@ -193,6 +197,13 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 	{
 		if (g_dumpAt[i] == vblankNo)
 			dumpDisplayBMP(vblankNo);
+	}
+
+	if (g_frameCrc)
+	{
+		int masked;
+		uint32_t crc = GPU_DisplayCRC32(&masked);
+		fprintf(stderr, "[frame] %lu crc=%08X%s\n", vblankNo, crc, masked ? " masked" : "");
 	}
 
 	if (g_vkUp)

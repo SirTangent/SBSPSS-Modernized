@@ -30,6 +30,9 @@
 	                        disables the playback device)
 	  --save-dir <path>     SBSP_SAVE_DIR (M6: memory-card image directory,
 	                        default %APPDATA%\SBSPSS)
+	  --pad-file <path>     SBSP_PAD_FILE   (M8: see host/input.cpp)
+	  --record-pad <path>   SBSP_RECORD_PAD (M8)
+	  --frame-crc           SBSP_FRAME_CRC=1 (M8: [frame] line per vblank)
 	  --no-cd-pace          SBSP_CD_PACE=0
 	  --no-audio            SBSP_NO_AUDIO=1
 	  --pace-log            SBSP_PACE_LOG=1
@@ -95,6 +98,14 @@ static void usage(void)
 		"  --invincible          player takes no damage   (SBSP_INVINCIBLE=1)\n"
 		"  --data-dir <path>     CD data directory        (SBSP_DATA_DIR)\n"
 		"  --pad-script <s>      scripted input           (SBSP_PAD_SCRIPT)\n"
+		"  --pad-file <path>     scripted input from file (SBSP_PAD_FILE)\n"
+		"                        lines: <vblank>:<hex> | <Scene>#<n>+<off>:<hex>\n"
+		"                        hex mask: START=0800 SELECT=0100 UP=1000 RIGHT=2000\n"
+		"                        DOWN=4000 LEFT=8000 CROSS=0040 CIRCLE=0020 SQUARE=0080\n"
+		"                        TRIANGLE=0010 L1=0004 R1=0008 L2=0001 R2=0002\n"
+		"  --record-pad <path>   write the applied input  (SBSP_RECORD_PAD)\n"
+		"                        in --pad-file form, with # epoch desync markers\n"
+		"  --frame-crc           [frame] <vbl> crc= line  (SBSP_FRAME_CRC=1)\n"
 		"  --dump-frames <list>  BMP dump vblanks         (SBSP_DUMP_FRAMES)\n"
 		"  --dump-dir <path>     where dumps go           (SBSP_DUMP_DIR)\n"
 		"  --exit-after <n>      clean exit at vblank n   (SBSP_EXIT_AFTER)\n"
@@ -149,6 +160,8 @@ static void parseArgs(void)
 		{ "--exit-after",  "SBSP_EXIT_AFTER"  },
 		{ "--dump-audio",  "SBSP_DUMP_AUDIO"  },
 		{ "--save-dir",    "SBSP_SAVE_DIR"    },
+		{ "--pad-file",    "SBSP_PAD_FILE"    },
+		{ "--record-pad",  "SBSP_RECORD_PAD"  },
 	};
 
 	const char *e = getenv("SBSP_BOOT_LEVEL");
@@ -188,6 +201,11 @@ static void parseArgs(void)
 		if (strcmp(__argv[i], "--invincible") == 0)
 		{
 			_putenv("SBSP_INVINCIBLE=1");
+			continue;
+		}
+		if (strcmp(__argv[i], "--frame-crc") == 0)
+		{
+			_putenv("SBSP_FRAME_CRC=1");
 			continue;
 		}
 		int matched = 0;

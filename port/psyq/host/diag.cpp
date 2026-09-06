@@ -12,8 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <string>
-#include <vector>
 
 #include "system/types.h"
 #include "system/asmport.h"		/* PORT_Scratchpad + guard */
@@ -21,17 +19,26 @@
 #include "host/pump.h"
 
 extern "C" unsigned long GPU_PrimPoolPeak(void);	/* gpu/gp0.cpp */
+extern "C" int Port_InputAtExit(void);				/* host/input.cpp */
 
 namespace
 {
 
+/*	NO C++ containers / delete in shim code that links into the game exe:
+	mem/memory.cpp replaces the global operator delete (-> MemFree on the
+	game arena) but supplies only a two-argument operator new, so a shim
+	`new` lands in the CRT heap and its `delete` trashes the game heap
+	("Memory guard trashed").  malloc/realloc/free only.  */
 struct SceneRec
 {
-	std::string					name;
-	std::vector<unsigned long>	opens;		/* vblank of each open, in order */
+	char			name[48];
+	unsigned long	*opens;		/* vblank of each open, in order */
+	int				count, cap;
 };
 
-std::vector<SceneRec>	g_scenes;
+enum { MAX_SCENES = 32 };
+SceneRec				g_scenes[MAX_SCENES];
+int						g_sceneCount;
 char					g_currentScene[64] = "boot";	/* plain chars: the watchdog
 														   thread reads it unlocked */
 unsigned long			g_assertCount;
@@ -41,9 +48,9 @@ int						g_peakNodes;
 
 SceneRec *findScene(const char *name)
 {
-	for (SceneRec &r : g_scenes)
-		if (r.name == name)
-			return &r;
+	for (int i = 0; i < g_sceneCount; i++)
+		if (strcmp(g_scenes[i].name, name) == 0)
+			return &g_scenes[i];
 	return NULL;
 }
 
@@ -94,13 +101,20 @@ void noteOpen(const char *name)
 {
 	unsigned long vb = Port_VBlankCount();
 	SceneRec *r = findScene(name);
-	if (!r)
+	if (!r && g_sceneCount < MAX_SCENES)
 	{
-		g_scenes.push_back(SceneRec());
-		r = &g_scenes.back();
-		r->name = name;
+		r = &g_scenes[g_sceneCount++];
+		snprintf(r->name, sizeof(r->name), "%s", name);
 	}
-	r->opens.push_back(vb);
+	if (r)
+	{
+		if (r->count == r->cap)
+		{
+			r->cap   = r->cap ? r->cap * 2 : 8;
+			r->opens = (unsigned long *)realloc(r->opens, r->cap * sizeof(unsigned long));
+		}
+		r->opens[r->count++] = vb;
+	}
 	snprintf(g_currentScene, sizeof(g_currentScene), "%s", name);
 	fprintf(stderr, "[scene] %s vblank=%lu\n", name, vb);
 	fflush(stderr);
@@ -226,13 +240,13 @@ extern "C" void Port_MemWatch(void)
 extern "C" int Port_SceneOpenCount(const char *name)
 {
 	SceneRec *r = findScene(name);
-	return r ? (int)r->opens.size() : 0;
+	return r ? r->count : 0;
 }
 
 extern "C" int Port_SceneOpenVblank(const char *name, int nth, unsigned long *vblank)
 {
 	SceneRec *r = findScene(name);
-	if (!r || nth < 1 || nth > (int)r->opens.size())
+	if (!r || nth < 1 || nth > r->count)
 		return 0;
 	*vblank = r->opens[nth - 1];
 	return 1;
@@ -261,6 +275,9 @@ extern "C" void Port_Exit(int code)
 		fflush(stderr);
 		_exit(code);
 	}
+
+	if (code == PORT_EXIT_CLEAN && Port_InputAtExit())
+		code = PORT_EXIT_ORACLE;
 
 	fprintf(stderr, "[summary] exit=%d vblanks=%lu scene=%s asserts=%lu "
 					"peak_ram=%lu peak_memnodes=%d/256 peak_prim=%lu\n",
