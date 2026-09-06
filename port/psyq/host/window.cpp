@@ -24,6 +24,7 @@
 
 #include "gpu/gpu_core.h"
 #include "host/diag.h"
+#include "host/pump.h"
 
 bool VkPresent_Init(SDL_Window *window);	/* port/psyq/vk/vk_present.cpp */
 void VkPresent_Frame(void);
@@ -206,8 +207,19 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 		fprintf(stderr, "[frame] %lu crc=%08X%s\n", vblankNo, crc, masked ? " masked" : "");
 	}
 
+	/*	Uncapped runs would otherwise be re-capped by the presenter's vsync
+		wait: present at most ~60 times a second of wall time and let the
+		emulated vblanks run ahead.  */
 	if (g_vkUp)
-		VkPresent_Frame();
+	{
+		static double lastPresent = -1.0;
+		double now = Port_NowSeconds();
+		if (!Port_Uncapped() || now - lastPresent >= 1.0 / 60.0)
+		{
+			lastPresent = now;
+			VkPresent_Frame();
+		}
+	}
 
 	if (g_exitAfter && vblankNo >= g_exitAfter)
 	{

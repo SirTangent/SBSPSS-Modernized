@@ -36,6 +36,10 @@
 	  --no-cd-pace          SBSP_CD_PACE=0
 	  --no-audio            SBSP_NO_AUDIO=1
 	  --pace-log            SBSP_PACE_LOG=1
+	  --uncapped            SBSP_UNCAPPED=1 (M8: host/pump.cpp - one vblank per
+	                        pump, no wall clock; with --no-cd-pace --no-audio
+	                        --seed the run is deterministic and faster than
+	                        real time)
 
 	Both "--flag value" and "--flag=value" spellings work.  Unknown
 	arguments warn and are ignored (the run continues).  --help prints
@@ -114,6 +118,8 @@ static void usage(void)
 		"  --no-cd-pace          instant loads            (SBSP_CD_PACE=0)\n"
 		"  --no-audio            no playback device       (SBSP_NO_AUDIO=1)\n"
 		"  --pace-log            frame-pacing stderr log  (SBSP_PACE_LOG=1)\n"
+		"  --uncapped            vblanks not wall-paced   (SBSP_UNCAPPED=1)\n"
+		"                        (+ --no-cd-pace --no-audio --seed: deterministic, fast)\n"
 		"Env only: SBSP_ASSERT_CONTINUE=1 (log asserts, keep running),\n"
 		"          SBSP_PRIM_LOG=1 / SBSP_MEM_LOG=1 (prim-pool / RamUsed high-water logs),\n"
 		"          SBSP_WATCHDOG=<s> (exit 12 after s seconds without a vblank; 30, 0=off),\n"
@@ -206,6 +212,11 @@ static void parseArgs(void)
 		if (strcmp(__argv[i], "--frame-crc") == 0)
 		{
 			_putenv("SBSP_FRAME_CRC=1");
+			continue;
+		}
+		if (strcmp(__argv[i], "--uncapped") == 0)
+		{
+			_putenv("SBSP_UNCAPPED=1");
 			continue;
 		}
 		int matched = 0;
