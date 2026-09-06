@@ -52,7 +52,7 @@ pacman -U https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-sdl3-3.4.10-1-any.
 **IMPORTANT:** At this point, you can use your default terminal. The correct version of git won't be in MSYS2 shell.
 
 ```bat
-git clone https://github.com/SirTangent/SBSPSS-Modernized.git
+git clone https://github.com/SirTangent/SBSPSS-Supercharged.git
 cd SBSPSS-Modernized
 git lfs pull
 ```
