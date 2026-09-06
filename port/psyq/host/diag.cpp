@@ -32,7 +32,8 @@ struct SceneRec
 };
 
 std::vector<SceneRec>	g_scenes;
-std::string				g_currentScene = "boot";
+char					g_currentScene[64] = "boot";	/* plain chars: the watchdog
+														   thread reads it unlocked */
 unsigned long			g_assertCount;
 PortGameGlobals			g_globals;		/* all NULL until Port_RegisterGameGlobals */
 unsigned long			g_peakRam;
@@ -52,6 +53,43 @@ int envFlag(const char *name)
 	return e && *e && *e != '0';
 }
 
+/*	SBSP_SELFTEST=assert|fault|hang@<vblank>: exercise one exit path on
+	purpose so run_tier.py can prove the exit codes (10/11/12) and their
+	log lines without a throwaway build.  */
+void selfTest(void)
+{
+	static int			parsed;
+	static char			mode[16];
+	static unsigned long	at;
+
+	if (!parsed)
+	{
+		parsed = 1;
+		const char *e = getenv("SBSP_SELFTEST");
+		if (e && *e)
+		{
+			char *end;
+			const char *sep = strchr(e, '@');
+			size_t n = sep ? (size_t)(sep - e) : strlen(e);
+			snprintf(mode, sizeof(mode), "%.*s", (int)(n < sizeof(mode) - 1 ? n : sizeof(mode) - 1), e);
+			at = sep ? strtoul(sep + 1, &end, 10) : 1;
+			fprintf(stderr, "[selftest] %s at vblank %lu\n", mode, at);
+		}
+	}
+	if (!mode[0] || Port_VBlankCount() < at)
+		return;
+	if (strcmp(mode, "assert") == 0)
+		Port_Assert("SBSP_SELFTEST", __FILE__, __LINE__);
+	else if (strcmp(mode, "fault") == 0)
+		*(volatile int *)0 = 0;
+	else if (strcmp(mode, "hang") == 0)
+		for (;;)
+			Sleep(1);		/* never pumps: only the watchdog thread can end this */
+	else
+		fprintf(stderr, "[selftest] unknown mode '%s' - ignored\n", mode);
+	mode[0] = 0;
+}
+
 void noteOpen(const char *name)
 {
 	unsigned long vb = Port_VBlankCount();
@@ -63,7 +101,7 @@ void noteOpen(const char *name)
 		r->name = name;
 	}
 	r->opens.push_back(vb);
-	g_currentScene = name;
+	snprintf(g_currentScene, sizeof(g_currentScene), "%s", name);
 	fprintf(stderr, "[scene] %s vblank=%lu\n", name, vb);
 	fflush(stderr);
 }
@@ -96,7 +134,7 @@ extern "C" void Port_FmaEvent(int script)
 
 extern "C" const char *Port_CurrentScene(void)
 {
-	return g_currentScene.c_str();
+	return g_currentScene;
 }
 
 /*****************************************************************************/
@@ -121,6 +159,9 @@ extern "C" void Port_RegisterGameGlobals(unsigned long *ramUsed, int *memNodeCou
 		*invincibleSponge = 1;
 		fprintf(stderr, "[args] invincible: on\n");
 	}
+
+	Port_CrashInit();
+	Port_WatchdogStart();
 }
 
 extern "C" const PortGameGlobals *Port_GameGlobals(void)
@@ -146,7 +187,7 @@ extern "C" void Port_MemWatch(void)
 		g_peakRam = *g_globals.ramUsed;
 		if (logging)
 			fprintf(stderr, "[mem] RamUsed high-water %lu bytes (%s, vblank %lu)\n",
-					g_peakRam, g_currentScene.c_str(), Port_VBlankCount());
+					g_peakRam, g_currentScene, Port_VBlankCount());
 	}
 
 	if (g_globals.memNodeCount)
@@ -159,7 +200,7 @@ extern "C" void Port_MemWatch(void)
 			warnedNodes = 1;
 			fprintf(stderr, "[mem] WARNING: MemNodeCount at %d/256 (%s, vblank %lu) - "
 							"raise LListLen (source/mem/memory.h) before it overruns\n",
-					n, g_currentScene.c_str(), Port_VBlankCount());
+					n, g_currentScene, Port_VBlankCount());
 		}
 	}
 
@@ -172,13 +213,14 @@ extern "C" void Port_MemWatch(void)
 				warnedPad = 1;
 				fprintf(stderr, "[mem] LEAK scratchpad overrun: guard byte %d = 0x%02X "
 								"(%s, vblank %lu)\n",
-						i, PORT_Scratchpad[1024 + i], g_currentScene.c_str(),
+						i, PORT_Scratchpad[1024 + i], g_currentScene,
 						Port_VBlankCount());
 				break;
 			}
 		}
 	}
 	fflush(stderr);
+	selfTest();
 }
 
 extern "C" int Port_SceneOpenCount(const char *name)
@@ -201,7 +243,7 @@ extern "C" void Port_Assert(const char *expr, const char *file, int line)
 {
 	g_assertCount++;
 	fprintf(stderr, "[assert] %s at %s:%d (%s, vblank %lu)\n",
-			expr, file, line, g_currentScene.c_str(), Port_VBlankCount());
+			expr, file, line, g_currentScene, Port_VBlankCount());
 	fflush(stderr);
 	if (!envFlag("SBSP_ASSERT_CONTINUE"))
 		Port_Exit(PORT_EXIT_ASSERT);
@@ -222,7 +264,7 @@ extern "C" void Port_Exit(int code)
 
 	fprintf(stderr, "[summary] exit=%d vblanks=%lu scene=%s asserts=%lu "
 					"peak_ram=%lu peak_memnodes=%d/256 peak_prim=%lu\n",
-			code, Port_VBlankCount(), g_currentScene.c_str(), g_assertCount,
+			code, Port_VBlankCount(), g_currentScene, g_assertCount,
 			g_peakRam, g_peakNodes, GPU_PrimPoolPeak());
 	fflush(stderr);
 	_exit(code);

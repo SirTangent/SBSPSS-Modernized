@@ -104,7 +104,10 @@ static void usage(void)
 		"  --no-audio            no playback device       (SBSP_NO_AUDIO=1)\n"
 		"  --pace-log            frame-pacing stderr log  (SBSP_PACE_LOG=1)\n"
 		"Env only: SBSP_ASSERT_CONTINUE=1 (log asserts, keep running),\n"
-		"          SBSP_PRIM_LOG=1 / SBSP_MEM_LOG=1 (prim-pool / RamUsed high-water logs)\n");
+		"          SBSP_PRIM_LOG=1 / SBSP_MEM_LOG=1 (prim-pool / RamUsed high-water logs),\n"
+		"          SBSP_WATCHDOG=<s> (exit 12 after s seconds without a vblank; 30, 0=off),\n"
+		"          SBSP_SELFTEST=assert|fault|hang@<vblank> (exercise an exit path)\n"
+		"Exit codes: 0 clean, 10 assert, 11 fault, 12 watchdog, 13 replay/oracle\n");
 }
 
 /*	If argv[*i] names this option, set *matched and return its value:
