@@ -329,6 +329,18 @@ after it).  The guard is `port/build-psx.cmd` + a SHA-256 compare of
     `SBSP_SEED`) when one was given - the `Port_BootLevel` pattern
     (entry #16).
 
+27. **`source/system/asmport.h` (scratchpad guard bytes)** - the PC-only
+    `PORT_Scratchpad` declaration grows by `PORT_SCRATCHPAD_GUARD` (16)
+    bytes, matching the definition in `port/psyq/api/arena.cpp`, which
+    seeds them with `0xA5`.  `SCRATCH_RAM` users see the same 1KB; the
+    shim's `Port_MemWatch` (`host/diag.cpp`, every vblank) reports
+    `[mem] LEAK scratchpad overrun` once if a guard byte ever changes.
+    There is no scratchpad allocator to measure usage against, so this
+    is an overrun canary, not a percentage.  Same watch: `RamUsed`
+    high-water (`SBSP_MEM_LOG=1`) and a one-shot `[mem] WARNING` at
+    224/256 `MemNodeCount`.  Header-only change inside the block the
+    PlayStation build skips.
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

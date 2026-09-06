@@ -47,6 +47,10 @@ void	Port_RegisterGameGlobals(unsigned long *ramUsed, int *memNodeCount,
 								 unsigned char **primListStart, unsigned char **primListEnd);
 const struct PortGameGlobals *Port_GameGlobals(void);
 
+/*	Once per vblank (Host_VBlank): RamUsed high-water (SBSP_MEM_LOG=1),
+	MemNodeCount vs its 256 cap, scratchpad guard bytes ([mem] LEAK).  */
+void	Port_MemWatch(void);
+
 const char		*Port_CurrentScene(void);
 int				Port_SceneOpenCount(const char *sceneName);
 /*	vblank of the nth (1-based) open of a scene; 0 = not opened that often  */

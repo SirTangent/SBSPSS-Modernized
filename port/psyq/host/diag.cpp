@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "system/types.h"
+#include "system/asmport.h"		/* PORT_Scratchpad + guard */
 #include "host/diag.h"
 #include "host/pump.h"
 
@@ -33,6 +35,8 @@ std::vector<SceneRec>	g_scenes;
 std::string				g_currentScene = "boot";
 unsigned long			g_assertCount;
 PortGameGlobals			g_globals;		/* all NULL until Port_RegisterGameGlobals */
+unsigned long			g_peakRam;
+int						g_peakNodes;
 
 SceneRec *findScene(const char *name)
 {
@@ -124,6 +128,59 @@ extern "C" const PortGameGlobals *Port_GameGlobals(void)
 	return &g_globals;
 }
 
+/*****************************************************************************/
+/*	Mirrors gp0.cpp's primPoolWatch: high-water logging behind an env flag,
+	one-shot warnings at 87.5% of a hard cap.  MemNodeCount's cap is LListLen
+	(256, mem/memory.h) - the game's own `ASSERT(MemNodeCount<LListLen)` is
+	DEBUG-only and post-hoc.  */
+extern "C" void Port_MemWatch(void)
+{
+	static int	logging = -1;
+	static int	warnedNodes, warnedPad;
+
+	if (logging < 0)
+		logging = envFlag("SBSP_MEM_LOG");
+
+	if (g_globals.ramUsed && *g_globals.ramUsed > g_peakRam)
+	{
+		g_peakRam = *g_globals.ramUsed;
+		if (logging)
+			fprintf(stderr, "[mem] RamUsed high-water %lu bytes (%s, vblank %lu)\n",
+					g_peakRam, g_currentScene.c_str(), Port_VBlankCount());
+	}
+
+	if (g_globals.memNodeCount)
+	{
+		int n = *g_globals.memNodeCount;
+		if (n > g_peakNodes)
+			g_peakNodes = n;
+		if (!warnedNodes && n >= 256 - 256 / 8)
+		{
+			warnedNodes = 1;
+			fprintf(stderr, "[mem] WARNING: MemNodeCount at %d/256 (%s, vblank %lu) - "
+							"raise LListLen (source/mem/memory.h) before it overruns\n",
+					n, g_currentScene.c_str(), Port_VBlankCount());
+		}
+	}
+
+	if (!warnedPad)
+	{
+		for (int i = 0; i < PORT_SCRATCHPAD_GUARD; i++)
+		{
+			if (PORT_Scratchpad[1024 + i] != PORT_SCRATCHPAD_GUARD_BYTE)
+			{
+				warnedPad = 1;
+				fprintf(stderr, "[mem] LEAK scratchpad overrun: guard byte %d = 0x%02X "
+								"(%s, vblank %lu)\n",
+						i, PORT_Scratchpad[1024 + i], g_currentScene.c_str(),
+						Port_VBlankCount());
+				break;
+			}
+		}
+	}
+	fflush(stderr);
+}
+
 extern "C" int Port_SceneOpenCount(const char *name)
 {
 	SceneRec *r = findScene(name);
@@ -163,9 +220,10 @@ extern "C" void Port_Exit(int code)
 		_exit(code);
 	}
 
-	fprintf(stderr, "[summary] exit=%d vblanks=%lu scene=%s asserts=%lu peak_prim=%lu\n",
+	fprintf(stderr, "[summary] exit=%d vblanks=%lu scene=%s asserts=%lu "
+					"peak_ram=%lu peak_memnodes=%d/256 peak_prim=%lu\n",
 			code, Port_VBlankCount(), g_currentScene.c_str(), g_assertCount,
-			GPU_PrimPoolPeak());
+			g_peakRam, g_peakNodes, GPU_PrimPoolPeak());
 	fflush(stderr);
 	_exit(code);
 }

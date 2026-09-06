@@ -104,7 +104,7 @@ static void usage(void)
 		"  --no-audio            no playback device       (SBSP_NO_AUDIO=1)\n"
 		"  --pace-log            frame-pacing stderr log  (SBSP_PACE_LOG=1)\n"
 		"Env only: SBSP_ASSERT_CONTINUE=1 (log asserts, keep running),\n"
-		"          SBSP_PRIM_LOG=1 (prim-pool high-water log)\n");
+		"          SBSP_PRIM_LOG=1 / SBSP_MEM_LOG=1 (prim-pool / RamUsed high-water logs)\n");
 }
 
 /*	If argv[*i] names this option, set *matched and return its value:

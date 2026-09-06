@@ -187,6 +187,7 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 		"[input] SBSP_PAD_SCRIPT: N entries" line to say why.  The keyboard
 		and gamepad readers already handle their absence.  */
 	Port_InputFrame(vblankNo);	/* rebuild the PS1 pad packet */
+	Port_MemWatch();
 
 	for (int i = 0; i < g_dumpCount; i++)
 	{
