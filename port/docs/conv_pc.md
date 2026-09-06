@@ -274,6 +274,61 @@ behavioural divergence was added on user request:
     it on every single launch, before any UI exists to decline.  Found
     by the M6 code-review pass.
 
+## Game-source changes (M8)
+
+The M8 playthrough harness (`port/psyq/host/diag.cpp`, `autoplay.cpp`,
+the pad-file player in `input.cpp`, `port/tests/run_tier.py`) is
+shim-side; the entries below are its game-side hooks.  Each is a
+`#if !defined(PSX_MIPS_ASM)` arm (the entry #16 pattern), so the
+PlayStation build is byte-identical.  Prototypes live in the existing
+PC-only block of `source/system/asmport.h`.
+
+**Byte-identical means hash-identical here, not size-identical.**  The
+DEBUG `ASSERT`/`DBGMSG` macros bake `__LINE__` into the code, so a PC-only
+block that adds lines *above* one of them shifts those immediates (M8
+found 14 such bytes, all `+3`, after the first two hooks).  Where that
+happens the block carries an `#else` / `#line <n>` arm that restores the
+original numbering for the PlayStation preprocessor only: `<n>` is the
+pristine line number of the block's `#endif` (i.e. one less than the line
+after it).  The guard is `port/build-psx.cmd` + a SHA-256 compare of
+`Spongey.cpe` against a build of the pristine sources.
+
+23. **`source/system/gstate.cpp` (scene epochs)** - `GameState::think()`
+    calls `Port_SceneEvent(getSceneName())` right before a new scene's
+    `init()`, *outside* the `__VERSION_DEBUG__` block, so FINAL emits
+    `[scene] <name> vblank=<n>` lines too.  The Tier-1 oracle matches a
+    run's exact `[scene]` sequence.
+
+24. **`source/fma/fma.cpp` (FMA script identity)** -
+    `CFmaScene::getSceneName()` returns `"FMA"` for every script, so
+    `CFmaScene::init()` additionally calls `Port_FmaEvent(s_chosenScript)`
+    at the point the chosen script is bound, giving a second
+    `[scene] FMA:CH3FINISHED`-style line.  `getSceneName()` is unchanged.
+
+25. **`source/system/dbg.cpp` (`DoAssert` -> `Port_Assert`)** - the DEBUG
+    `DoAssert` (on-screen dump, then `PSYQpause()` = `__builtin_trap()` via
+    the `libsn.h` shadow) now calls `Port_Assert(expr,file,line)` and
+    returns: `[assert] <expr> at <file>:<line> (<scene>, vblank <n>)`, then
+    exit code 10 - or keep running under `SBSP_ASSERT_CONTINUE=1`.  The
+    `ASSERT` macro in `dbg.h` is untouched (still `;` in FINAL).  `dbg.cpp`
+    did not include `asmport.h` (directly or via `global.h`), so it gains
+    that include - otherwise its `PSX_MIPS_ASM` test would be false on the
+    PlayStation build too.
+
+26. **`source/system/main.cpp` (`Port_RegisterGameGlobals`, `--seed`)** -
+    `main()` starts by handing the shim the addresses of `MainRam.RamUsed`,
+    `MemNodeCount`, `invincibleSponge` and the four prim-pool pointers
+    (`Port_RegisterGameGlobals`, `port/psyq/host/diag.cpp`).  The prim-pool
+    watch in `port/psyq/gpu/gp0.cpp` reads through that registry instead of
+    `__attribute__((weak))` externs, and the `[mem]` watch, `[summary]` and
+    `--invincible` use it too; the shim-only unit exes never register, so
+    every pointer stays NULL there.  Two new one-line externs
+    (`MemNodeCount`, `invincibleSponge`) sit in the existing PC-only block.
+    `InitSystem()`'s `setRndSeed(VidGetTickCount())` gains a
+    `!PSX_MIPS_ASM` arm that takes `Port_BootSeed()` (`--seed` /
+    `SBSP_SEED`) when one was given - the `Port_BootLevel` pattern
+    (entry #16).
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).

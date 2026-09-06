@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "gpu/gpu_core.h"
+#include "host/diag.h"
 
 bool VkPresent_Init(SDL_Window *window);	/* port/psyq/vk/vk_present.cpp */
 void VkPresent_Frame(void);
@@ -169,12 +170,8 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 		{
 			if (ev.type == SDL_EVENT_QUIT)
 			{
-				/*	_exit, not exit: the game never shuts down on PS1, so its
-					static destructors were never designed to run (one traps).
-					The OS reclaims everything.  */
 				fprintf(stderr, "[host] window closed - exiting\n");
-				fflush(stderr);
-				_exit(0);
+				Port_Exit(PORT_EXIT_CLEAN);
 			}
 			if (ev.type == SDL_EVENT_GAMEPAD_ADDED ||
 				ev.type == SDL_EVENT_GAMEPAD_REMOVED)
@@ -203,8 +200,7 @@ extern "C" void Host_VBlank(unsigned long vblankNo)
 	if (g_exitAfter && vblankNo >= g_exitAfter)
 	{
 		fprintf(stderr, "[host] SBSP_EXIT_AFTER=%lu reached - exiting\n", g_exitAfter);
-		fflush(stderr);
-		_exit(0);	/* skip game static dtors - see the QUIT path */
+		Port_Exit(PORT_EXIT_CLEAN);
 	}
 
 	inHere = 0;

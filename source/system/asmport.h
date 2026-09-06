@@ -45,6 +45,17 @@ void	GTEport_Op(u32 op);					/* cop2 command (DMPSX tag word) */
 	points at it.  Declared here so game code and shim share one contract.
 */
 extern unsigned char	PORT_Scratchpad[1024];
+
+/*	M8 harness hooks (port/psyq/host/diag.cpp).  Game code calls them from
+	`#if !defined(PSX_MIPS_ASM)` arms only - see port/docs/conv_pc.md (M8).
+*/
+void	Port_SceneEvent(const char *sceneName);					/* system/gstate.cpp */
+void	Port_FmaEvent(int fmaScript);							/* fma/fma.cpp */
+void	Port_Assert(const char *expr,const char *file,int line);	/* system/dbg.cpp */
+void	Port_RegisterGameGlobals(u32 *ramUsed,int *memNodeCount,int *invincibleSponge,
+								 unsigned char **currPrim,unsigned char **endPrim,
+								 unsigned char **primListStart,unsigned char **primListEnd);	/* system/main.cpp */
+int		Port_BootSeed(long *seed);								/* system/main.cpp (args.cpp) */
 }
 #endif
 
