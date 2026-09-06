@@ -8,7 +8,7 @@ The original PS1 game ported over to modern operating systems (Windows 11)
 
 Back in 2001, SuperSponge was released for the original PlayStation (PS1). It was one of the first video games to be released under the franchise, followed by many more successful titles.
 
-Many years later, the full source code by Climax Development was released on the internet with everything needed to compile the game. The main hurdle was the development environment required, as compilation could only be done on a Windows 98 VM. The other elephant in the room was the target platform. Being solely a PS1 project, the code was written to work with it's hardware using the PSYQ SDK. In other words, the codebase would require major re-work with a new abstraction layer to operate on a modern OS (and system architecture)
+Many years later, the full source code by Climax Development was released on the internet with everything needed to compile the game. The main hurdle was the development environment required, as compilation could only be done on a Windows 98 VM. The other elephant in the room was the target platform. Being solely a PS1 project, the code was written to work with its hardware using the PSYQ SDK. In other words, the codebase would require major re-work with a new abstraction layer to operate on a modern OS (and system architecture)
 
 This project substitutes the PSYQ SDK and its toolchain with a modern one, targeting modern hardware. It's similar to PsyCross, but with some deliberations. The project lives in the `port` directory with the build scripts needed to generate a Windows executable. The game itself behaves and acts like the real thing from the PlayStation. There is no emulation happening in the backend, just  the game running on today's hardware for today's operating system. Hope you enjoy my project!
 
@@ -59,8 +59,6 @@ git lfs pull
 
 `git lfs pull` is not optional. Without it `Track1.Ixa` is a few-hundred-byte
 pointer file and the data build stops with "unmaterialised Git-LFS pointer".
-GitHub's free LFS tier is 1 GiB of bandwidth per month shared by everyone who
-clones, so pull it once and keep the clone.
 
 The Windows port lives on the `SBSP-Win11` branch until it lands on `master`:
 
@@ -128,7 +126,7 @@ port\build\debug\sbsp.exe
 A console window opens alongside the game window; it carries the shim's log
 (stub warnings, boot-level messages, pacing diagnostics). The game window is
 resizable and letterboxes the PS1 output to 4:3. Close the window to quit;
-there is no in-game exit because the PlayStation game never had one.
+there is no way to exit from the game's UI because the PlayStation game never had one.
 
 **Data location.** By default the game looks in
 `out\<territory>\<version>\version\CD\`, matching the variant it was built
@@ -187,7 +185,7 @@ grid of textures, you pressed Select; press it again.
 Yes, there is nothing really stopping you from compiling for the PS1 and emulating it. However, I believe there are benefits from stripping away the translation layer and applying optimizations that come from modern platforms. It also extends the game to run on less powerful (not that a PS1 game is power hungry) hardware.
 
 ### Why not use PsyCross?
-I guess there isn't a reason not to, but personally, I wanted to see what it took to port a game over from scratch with minimal dependencies. I'm aware of it's capabilities, and it's success with porting over titles such as Driver 2. My long-term goal is to re-design some of the mechanisms that will diverge from the translation layer completely.
+I guess there isn't a reason not to, but personally, I wanted to see what it took to port a game over from scratch with minimal dependencies. I'm aware of its capabilities, and its success with porting over titles such as Driver 2. My long-term goal is to re-design some of the mechanisms that will diverge from the translation layer completely.
 
 ### How dare you use AI for coding slop?
 If it's not obvious, the project used generative AI and agentic coding for a large chunk of the work. I do acknowlege that similar projects want to avoid AI for good reasons, which I can respect.
@@ -200,7 +198,7 @@ Given this was a solo project and that I have a full-time software engineering j
 
 ### Plan to support other platforms?
 
-Yes, Definately! Right now, the MVP is to get it ported for Windows 11. In addition, it only compiles as a 32-bit application (Using WoW64) and have it in-scope to refactor it to target x86-64. Once I finish the Win11 milestone, I can start to work on other ports. Here are some on the to-do list.
+Yes, Definately! Right now, the MVP is to get it ported for Windows 11. In addition, it only compiles as a 32-bit application (Using WoW64188) and have it in-scope to refactor it to target x86-64. Once I finish the Win11 milestone, I can start to work on other ports. Here are some on the to-do list.
 
 * MacOS
 * Linux
