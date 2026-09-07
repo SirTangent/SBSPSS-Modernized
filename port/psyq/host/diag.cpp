@@ -39,6 +39,7 @@ struct SceneRec
 enum { MAX_SCENES = 32 };
 SceneRec				g_scenes[MAX_SCENES];
 int						g_sceneCount;
+unsigned long			g_lastOpenVblank;
 char					g_currentScene[64] = "boot";	/* plain chars: the watchdog
 														   thread reads it unlocked */
 unsigned long			g_assertCount;
@@ -97,9 +98,12 @@ void selfTest(void)
 	mode[0] = 0;
 }
 
-void noteOpen(const char *name)
+/*	subEvent: a second name for the scene that just opened (FMA:<script>),
+	recorded at that open's vblank so entries anchored to either name mean
+	the same occurrence, and never counted as a new open of its own.  */
+void noteOpen(const char *name, int subEvent)
 {
-	unsigned long vb = Port_VBlankCount();
+	unsigned long vb = subEvent ? g_lastOpenVblank : Port_VBlankCount();
 	SceneRec *r = findScene(name);
 	if (!r && g_sceneCount < MAX_SCENES)
 	{
@@ -115,6 +119,8 @@ void noteOpen(const char *name)
 		}
 		r->opens[r->count++] = vb;
 	}
+	if (!subEvent)
+		g_lastOpenVblank = vb;
 	snprintf(g_currentScene, sizeof(g_currentScene), "%s", name);
 	fprintf(stderr, "[scene] %s vblank=%lu\n", name, vb);
 	fflush(stderr);
@@ -125,7 +131,7 @@ void noteOpen(const char *name)
 /*****************************************************************************/
 extern "C" void Port_SceneEvent(const char *name)
 {
-	noteOpen(name ? name : "?");
+	noteOpen(name ? name : "?", 0);
 }
 
 extern "C" void Port_FmaEvent(int script)
@@ -138,11 +144,11 @@ extern "C" void Port_FmaEvent(int script)
 	};
 	char buf[32];
 	if (script >= 0 && script < (int)(sizeof(names) / sizeof(names[0])))
-		noteOpen(names[script]);
+		noteOpen(names[script], 1);
 	else
 	{
 		snprintf(buf, sizeof(buf), "FMA:%d", script);
-		noteOpen(buf);
+		noteOpen(buf, 1);
 	}
 }
 
@@ -241,6 +247,11 @@ extern "C" int Port_SceneOpenCount(const char *name)
 {
 	SceneRec *r = findScene(name);
 	return r ? r->count : 0;
+}
+
+extern "C" unsigned long Port_LastSceneOpenVblank(void)
+{
+	return g_lastOpenVblank;
 }
 
 extern "C" int Port_SceneOpenVblank(const char *name, int nth, unsigned long *vblank)

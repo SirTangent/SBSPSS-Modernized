@@ -27,6 +27,14 @@
 	    Map#2+30:2000             30 vblanks after the 2nd open of "Map"
 	    FMA:INTRO#1+10:0800       (FMA scripts use the [scene] FMA:<name>)
 	    # epoch 3000 ram=123456 crc=89ABCDEF
+	A scene-relative entry is in force only while its anchor occurrence is
+	the CURRENT scene: the moment another scene opens, entries anchored to
+	the previous one expire (an absolute entry never does).  That is what a
+	route author means by "during the 2nd Map", and it lets a boot-time
+	button pulse train anchored to FrontEnd#1 stop by itself when the
+	first level opens.  Within the entries in force, the latest one that
+	has come due wins.
+
 	The `# epoch` markers come from SBSP_RECORD_PAD=<path>, which writes
 	the applied mask in the scene-relative form plus one marker every 300
 	vblanks; replaying such a file re-checks them and reports "[replay]
@@ -81,6 +89,7 @@ struct PadEntry
 	unsigned long	vblank;			/* absolute; valid once `resolved` */
 	unsigned		mask;
 	int				resolved;
+	unsigned long	anchor;			/* open vblank of the anchor occurrence */
 	char			scene[48];		/* scene-relative entries only */
 	int				nth;
 	unsigned long	offset;
@@ -290,6 +299,7 @@ static void resolveEntries(void)
 		if (!e.resolved && Port_SceneOpenVblank(e.scene, e.nth, &vb))
 		{
 			e.vblank   = vb + e.offset;
+			e.anchor   = vb;
 			e.resolved = 1;
 		}
 	}
@@ -306,12 +316,15 @@ static unsigned scriptMask(unsigned long vblank)
 	unsigned		mask = 0;
 	int				found = 0;
 	unsigned long	best = 0;
+	unsigned long	current = Port_LastSceneOpenVblank();
 
 	for (int i = 0; i < g_entryCount; i++)
 	{
 		const PadEntry &e = g_entries[i];
 		if (!e.resolved || vblank < e.vblank)
 			continue;
+		if (e.scene[0] && e.anchor != current)
+			continue;					/* anchored to a scene that is over */
 		if (!found || e.vblank >= best)
 		{
 			best  = e.vblank;

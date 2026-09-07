@@ -22,9 +22,14 @@ static LONG WINAPI crashFilter(EXCEPTION_POINTERS *ep)
 {
 	const PortGameGlobals	*g    = Port_GameGlobals();
 	EXCEPTION_RECORD		*rec  = ep->ExceptionRecord;
+	uintptr_t				addr  = (uintptr_t)rec->ExceptionAddress;
+	uintptr_t				base  = (uintptr_t)GetModuleHandle(NULL);
 
-	fprintf(stderr, "[crash] code=0x%08lX addr=%p scene=%s vblank=%lu ram=%lu memnodes=%d\n",
+	/*	The exe is relocated at load (ASLR), so also print the address as
+		the linker saw it - image base 0x400000 + offset - for addr2line.  */
+	fprintf(stderr, "[crash] code=0x%08lX addr=%p (link 0x%08lX) scene=%s vblank=%lu ram=%lu memnodes=%d\n",
 			(unsigned long)rec->ExceptionCode, rec->ExceptionAddress,
+			(unsigned long)(addr - base + 0x400000ul),
 			Port_CurrentScene(), Port_VBlankCount(),
 			g->ramUsed ? *g->ramUsed : 0ul,
 			g->memNodeCount ? *g->memNodeCount : 0);

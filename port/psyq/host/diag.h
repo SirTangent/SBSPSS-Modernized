@@ -60,6 +60,8 @@ const char		*Port_CurrentScene(void);
 int				Port_SceneOpenCount(const char *sceneName);
 /*	vblank of the nth (1-based) open of a scene; 0 = not opened that often  */
 int				Port_SceneOpenVblank(const char *sceneName, int nth, unsigned long *vblank);
+/*	vblank of the most recent scene open of any kind (0 before the first)  */
+unsigned long	Port_LastSceneOpenVblank(void);
 
 #ifdef __cplusplus
 }
