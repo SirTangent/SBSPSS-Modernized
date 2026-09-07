@@ -365,6 +365,21 @@ after it).  The guard is `port/build-psx.cmd` + a SHA-256 compare of
     Parser and accessors: `port/psyq/host/autoplay.cpp`; prototypes in
     `asmport.h`.
 
+29. **`source/gfx/animtex.cpp` (`CAnimTex::GetSpeed`/`SetSpeed` on an empty
+    list)** - first bug found by the Tier 1 campaign route.  `CLevel::init`
+    (`level.cpp:263-267`) calls `CAnimTex::SetSpeed(-4)` when the game
+    scene reports chapter 5 level 4 or 5, and it still does during the
+    CH5FINISHED FMA (the FMA scene loads level 25 but `GameScene`'s level
+    number is the level just finished).  That level has no animated
+    textures, so `AnimTexList` is NULL and `ThisTex->Speed=Speed` writes
+    to address 0xC.  On the PlayStation that is kernel RAM and the write is
+    silently absorbed; on PC it is an access violation
+    (`[crash] ... scene=FMA:CH5FINISHED`, deterministic, 64 vblanks after
+    the scene opens).  Both accessors now return early on a NULL list in a
+    `!PSX_MIPS_ASM` arm; `hcswitch.cpp:116` (`SetSpeed(-GetSpeed())`) is
+    the other caller and gets the same protection.  `#line` re-synced
+    (ASSERTs follow in the same file).
+
 ## Not changed (accepted by `-fpermissive -std=gnu++98`)
 
 - String-literal → `char*` conversions (pervasive; `-Wno-write-strings`).
